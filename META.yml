@@ -1,0 +1,91 @@
+---
+abstract: 'Control the Amazon EC2 and Eucalyptus Clouds'
+author:
+  - 'Lincoln Stein <lincoln.stein@oicr.on.ca>'
+configure_requires:
+  Module::Build: 0.36
+generated_by: 'Module::Build version 0.3607'
+license: perl
+meta-spec:
+  url: http://module-build.sourceforge.net/META-spec-v1.4.html
+  version: 1.4
+name: VM-EC2
+provides:
+  VM::EC2:
+    file: lib/VM/EC2.pm
+    version: 1.0
+  VM::EC2::AvailabilityZone:
+    file: lib/VM/EC2/AvailabilityZone.pm
+  VM::EC2::BlockDevice:
+    file: lib/VM/EC2/BlockDevice.pm
+  VM::EC2::BlockDevice::Attachment:
+    file: lib/VM/EC2/BlockDevice/Attachment.pm
+  VM::EC2::BlockDevice::EBS:
+    file: lib/VM/EC2/BlockDevice/EBS.pm
+  VM::EC2::BlockDevice::Mapping:
+    file: lib/VM/EC2/BlockDevice/Mapping.pm
+  VM::EC2::BlockDevice::Mapping::EBS:
+    file: lib/VM/EC2/BlockDevice/Mapping/EBS.pm
+  VM::EC2::Dispatch:
+    file: lib/VM/EC2/Dispatch.pm
+  VM::EC2::ElasticAddress:
+    file: lib/VM/EC2/ElasticAddress.pm
+  VM::EC2::Error:
+    file: lib/VM/EC2/Error.pm
+  VM::EC2::Generic:
+    file: lib/VM/EC2/Generic.pm
+  VM::EC2::Group:
+    file: lib/VM/EC2/Group.pm
+  VM::EC2::Image:
+    file: lib/VM/EC2/Image.pm
+  VM::EC2::Image::LaunchPermission:
+    file: lib/VM/EC2/Image/LaunchPermission.pm
+  VM::EC2::Instance:
+    file: lib/VM/EC2/Instance.pm
+  VM::EC2::Instance::ConsoleOutput:
+    file: lib/VM/EC2/Instance/ConsoleOutput.pm
+  VM::EC2::Instance::Metadata:
+    file: lib/VM/EC2/Instance/Metadata.pm
+  VM::EC2::Instance::MonitoringState:
+    file: lib/VM/EC2/Instance/MonitoringState.pm
+  VM::EC2::Instance::PasswordData:
+    file: lib/VM/EC2/Instance/PasswordData.pm
+  VM::EC2::Instance::Placement:
+    file: lib/VM/EC2/Instance/Placement.pm
+  VM::EC2::Instance::Set:
+    file: lib/VM/EC2/Instance/Set.pm
+  VM::EC2::Instance::State:
+    file: lib/VM/EC2/Instance/State.pm
+  VM::EC2::Instance::State::Change:
+    file: lib/VM/EC2/Instance/State/Change.pm
+  VM::EC2::KeyPair:
+    file: lib/VM/EC2/KeyPair.pm
+  VM::EC2::Region:
+    file: lib/VM/EC2/Region.pm
+  VM::EC2::ReservationSet:
+    file: lib/VM/EC2/ReservationSet.pm
+  VM::EC2::SecurityGroup:
+    file: lib/VM/EC2/SecurityGroup.pm
+  VM::EC2::SecurityGroup::GroupPermission:
+    file: lib/VM/EC2/SecurityGroup/GroupPermission.pm
+  VM::EC2::SecurityGroup::IpPermission:
+    file: lib/VM/EC2/SecurityGroup/IpPermission.pm
+  VM::EC2::Snapshot:
+    file: lib/VM/EC2/Snapshot.pm
+  VM::EC2::Snapshot::CreateVolumePermission:
+    file: lib/VM/EC2/Snapshot/CreateVolumePermission.pm
+  VM::EC2::State::Reason:
+    file: lib/VM/EC2/Instance/State/Reason.pm
+  VM::EC2::Tag:
+    file: lib/VM/EC2/Tag.pm
+  VM::EC2::Volume:
+    file: lib/VM/EC2/Volume.pm
+requires:
+  Digest::SHA: 5.47
+  LWP: 5.835
+  MIME::Base64: 3.08
+  URI::URL: 5.03
+  XML::Simple: 2.18
+resources:
+  license: http://dev.perl.org/licenses/
+version: 1.0
