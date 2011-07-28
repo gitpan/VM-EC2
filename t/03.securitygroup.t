@@ -28,6 +28,8 @@ my $ec2 = VM::EC2->new() or BAIL_OUT("Can't load VM::EC2 module");
 # in case it was here from a previous invocation
 $ec2->delete_security_group(-name=>GROUP);
 
+$ec2->print_error(1);
+
 my $g = $ec2->create_security_group(-name        => GROUP,
 				    -description => GROUP_DESCRIPTION);
 ok($g,'create_security_group');
@@ -80,7 +82,7 @@ exit 0;
 
 
 END {
-    print STDERR "deleting test security group...\n";
+    print STDERR "# deleting test security group...\n";
     $ec2->delete_security_group(-name=>GROUP)
 	if $ec2;
 }

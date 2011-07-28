@@ -9,7 +9,7 @@ use File::Temp qw(tempfile);
 use FindBin '$Bin';
 use lib "$Bin/lib","$Bin/../lib","$Bin/../blib/lib","$Bin/../blib/arch";
 
-use constant TEST_COUNT => 26;
+use constant TEST_COUNT => 27;
 use Test::More tests => TEST_COUNT;
 use EC2TestSupport;
 use constant IMG_NAME => 'Test_Image_from_libVM_EC2';
@@ -25,7 +25,7 @@ skip "instance tests declined",TEST_COUNT unless confirm_payment();
 setup_environment();
 
 require_ok('VM::EC2');
-$ec2 = VM::EC2->new() or BAIL_OUT("Can't load VM::EC2 module");
+$ec2 = VM::EC2->new(-print_error=>1) or BAIL_OUT("Can't load VM::EC2 module");
 
 cleanup();
 
@@ -91,7 +91,10 @@ SKIP: {
     undef $volume;
 }
 
+$ec2->print_error(0); # avoid deliberate error message
 ok(!$instance->userData('abcdefg'),"don't change user data on running instance");
+$ec2->print_error(1);
+
 print STDERR "# Stopping instance...\n";
 ok($instance->stop('wait'),'stop running instance');
 is($instance->current_status,'stopped','stopped instance reports correct state');
@@ -115,7 +118,15 @@ SKIP: {
     ok(!$image->is_public,'newly created image not public');
     ok($image->make_public(1),'make image public');
     ok($image->is_public,'image now public');
+    my @block_devices = $image->blockDeviceMapping;
+    ok(@block_devices>0,'block devices defined in image');
+
+    my @snapshots = map {$_->snapshotId} @block_devices;
     ok($ec2->deregister_image($image),'deregister_image');
+
+    foreach (@snapshots) {
+	$ec2->delete_snapshot($_) if $_;
+    }
 }
 
 }  # SKIP
@@ -124,6 +135,8 @@ SKIP: {
 exit 0;
 
 END {
+    $ec2->print_error(0);
+
     if ($instance) {
 	print STDERR "# Terminating $instance...\n";
 	$instance->terminate();
@@ -150,6 +163,7 @@ END {
 
 sub confirm_payment {
     print STDERR <<END;
+
 # This test will launch one "micro" instance under your Amazon account
 # and then terminate it, incurring a one hour runtime charge. This will
 # incur a charge of \$0.02 (as of July 2011), which may be covered under 
