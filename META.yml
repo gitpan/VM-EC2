@@ -1,6 +1,6 @@
 ---
 name: VM-EC2
-version: 1.03
+version: 1.04
 author:
   - 'Lincoln Stein <lincoln.stein@oicr.on.ca>'
 abstract: Control the Amazon EC2 and Eucalyptus Clouds
@@ -20,7 +20,7 @@ meta-spec:
 provides:
   VM::EC2:
     file: lib/VM/EC2.pm
-    version: 1.03
+    version: 1.04
   VM::EC2::AvailabilityZone:
     file: lib/VM/EC2/AvailabilityZone.pm
   VM::EC2::BlockDevice:
