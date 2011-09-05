@@ -1,26 +1,19 @@
 ---
-name: VM-EC2
-version: 1.04
+abstract: 'Control the Amazon EC2 and Eucalyptus Clouds'
 author:
   - 'Lincoln Stein <lincoln.stein@oicr.on.ca>'
-abstract: Control the Amazon EC2 and Eucalyptus Clouds
-license: perl
-requires:
-  Digest::SHA: 5.47
-  LWP: 5.835
-  MIME::Base64: 3.08
-  URI::URL: 5.03
-  XML::Simple: 2.18
 configure_requires:
-  Module::Build: 0.340201
-generated_by: Module::Build version 0.340201
+  Module::Build: 0.36
+generated_by: 'Module::Build version 0.3607'
+license: perl
 meta-spec:
   url: http://module-build.sourceforge.net/META-spec-v1.4.html
   version: 1.4
+name: VM-EC2
 provides:
   VM::EC2:
     file: lib/VM/EC2.pm
-    version: 1.04
+    version: 1.05
   VM::EC2::AvailabilityZone:
     file: lib/VM/EC2/AvailabilityZone.pm
   VM::EC2::BlockDevice:
@@ -87,5 +80,12 @@ provides:
     file: lib/VM/EC2/Tag.pm
   VM::EC2::Volume:
     file: lib/VM/EC2/Volume.pm
+requires:
+  Digest::SHA: 5.47
+  LWP: 5.835
+  MIME::Base64: 3.08
+  URI::URL: 5.03
+  XML::Simple: 2.18
 resources:
   license: http://dev.perl.org/licenses/
+version: 1.05
