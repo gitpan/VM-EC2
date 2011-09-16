@@ -126,7 +126,7 @@ VM::EC2 - Control the Amazon EC2 and Eucalyptus Clouds
  # create a new 20 gig volume
  $vol = $ec2->create_volume(-availability_zone=> 'us-east-1a',
                             -size             =>  20);
- while ($vol->current_status eq 'creating') { sleep 2; }
+ $ec2->wait_for_volumes($vol);
  print "Volume $vol is ready!\n" if $vol->current_status eq 'available';
 
  # create a new elastic address and associate it with an instance
@@ -317,7 +317,7 @@ use VM::EC2::Dispatch;
 use VM::EC2::Error;
 use Carp 'croak','carp';
 
-our $VERSION = '1.05';
+our $VERSION = '1.06';
 our $AUTOLOAD;
 our @CARP_NOT = qw(VM::EC2::Image    VM::EC2::Volume
                    VM::EC2::Snapshot VM::EC2::Instance
@@ -1019,11 +1019,15 @@ Typical usage:
  my @failed = grep {$status->{$_} ne 'running'} @instances;
  print "The following failed: @failed\n";
 
+If no terminal state is reached within a set timeout, currently
+hardcoded at 10 minutes, then this method returns undef and sets
+$ec2->error_str() to a suitable message.
+
 =cut
 
 sub wait_for_instances {
     my $self = shift;
-    $self->wait_for_terminal_state(\@_,['running','stopped','terminated']);
+    $self->wait_for_terminal_state(\@_,['running','stopped','terminated'],600);    # ten minute timeout on instances
 }
 
 =head2 $ec2->wait_for_snapshots(@snapshots)
@@ -1032,24 +1036,31 @@ Wait for all members of the provided list of snapshots to reach some
 terminal state ("completed", "error"), and then return a hash
 reference that maps each snapshot ID to its final state.
 
+This method may potentially wait forever. It has no set timeout. Wrap
+it in an eval{} and set alarm() if you wish to timeout.
+
 =cut
 
 sub wait_for_snapshots {
     my $self = shift;
-    $self->wait_for_terminal_state(\@_,['completed','error'])
+    $self->wait_for_terminal_state(\@_,['completed','error'],0);  # no timeout on snapshots -- they may take days
 }
 
-=head2 $ec2->wait_for_volumes(@instances)
+=head2 $ec2->wait_for_volumes(@volumes)
 
 Wait for all members of the provided list of volumes to reach some
 terminal state ("available", "in-use", "deleted" or "error"), and then
-return a hash reference that maps each instance ID to its final state.
+return a hash reference that maps each volume ID to its final state.
+
+If no terminal state is reached within a set timeout, currently
+hardcoded at 1 minute, then this method returns undef and sets
+$ec2->error_str() to a suitable message.
 
 =cut
 
 sub wait_for_volumes {
     my $self = shift;
-    $self->wait_for_terminal_state(\@_,['available','in-use','deleted','error']);
+    $self->wait_for_terminal_state(\@_,['available','in-use','deleted','error'],60);  # sixty second timeout for creating volumes
 }
 
 =head2 $ec2->wait_for_attachments(@attachment)
@@ -1071,34 +1082,52 @@ Typical usage:
     my @failed = grep($s->{$_} ne 'attached'} @attach;
     warn "did not attach: ",join ', ',@failed;
 
+If no terminal state is reached within a set timeout, currently
+hardcoded at 1 minute, then this method returns undef and sets
+$ec2->error_str() to a suitable message.
+
 =cut
 
 sub wait_for_attachments {
     my $self = shift;
-    $self->wait_for_terminal_state(\@_,['attached','detached']);
+    $self->wait_for_terminal_state(\@_,['attached','detached'],60);  # sixty second timeout for attachments
 }
 
-=head2 $ec2->wait_for_terminal_state(\@objects,['list','of','states'])
+=head2 $ec2->wait_for_terminal_state(\@objects,['list','of','states'] [,$timeout])
 
 Generic version of the last four methods. Wait for all members of the provided list of Amazon objects 
 instances to reach some terminal state listed in the second argument, and then return
 a hash reference that maps each object ID to its final state.
 
+If a timeout is provided, in seconds, then the method will abort after
+waiting the indicated time and return undef.
+
 =cut
 
 sub wait_for_terminal_state {
     my $self = shift;
-    my ($objects,$terminal_states) = @_;
+    my ($objects,$terminal_states,$timeout) = @_;
     my %terminal_state = map {$_=>1} @$terminal_states;
     my %status = ();
-
-    my @pending = @$objects;
-    while (@pending) {
-	sleep 3;
-	$status{$_} = $_->current_status foreach @pending;
-	@pending    = grep { !$terminal_state{$status{$_}} } @pending;
+    my @pending = grep {defined $_} @$objects; # in case we're passed an undef
+    my $status = eval {
+	if ($timeout && $timeout > 0) {
+	    local $SIG{ALRM} = sub {die "timeout"};
+	    alarm($timeout);
+	}
+	while (@pending) {
+	    sleep 3;
+	    $status{$_} = $_->current_status foreach @pending;
+	    @pending    = grep { !$terminal_state{$status{$_}} } @pending;
+	}
+	\%status;
+    };
+    alarm(0);
+    if ($@ =~ /timeout/) {
+	$self->error('timeout waiting for terminal state');
+	return;
     }
-    return \%status;
+    return $status;
 }
 
 =head2 $password_data = $ec2->get_password_data(-instance_id=>'i-12345');
@@ -1239,6 +1268,9 @@ The following is the list of attributes that can be set:
  -root_device_name        -- root device name
  -source_dest_check       -- enable NAT (VPC only)
  -group_id                -- VPC security group
+ -block_devices           -- Specify block devices to change 
+                             deleteOnTermination flag
+ -block_device_mapping    -- Alias for -block_devices
 
 Only one attribute can be changed in a single request. For example:
 
@@ -1247,6 +1279,19 @@ Only one attribute can be changed in a single request. For example:
 The result code is true if the attribute was successfully modified,
 false otherwise. In the latter case, $ec2->error() will provide the
 error message.
+
+The ability to change the deleteOnTermination flag for attached block devices
+is not documented in the official Amazon API documentation, but appears to work.
+The syntax is:
+
+# turn on deleteOnTermination
+ $ec2->modify_instance_attribute(-block_devices=>'/dev/sdf=v-12345')
+# turn off deleteOnTermination
+ $ec2->modify_instance_attribute(-block_devices=>'/dev/sdf=v-12345')
+
+The syntax is slightly different from what is used by -block_devices
+in run_instances(), and is "device=volumeId:boolean". Multiple block
+devices can be specified using an arrayref.
 
 =cut
 
@@ -1262,6 +1307,8 @@ sub modify_instance_attribute {
     push @param,$self->list_parm('GroupId',\%args);
     push @param,('DisableApiTermination.Value'=>'true') if $args{-termination_protection};
     push @param,('InstanceInitiatedShutdownBehavior.Value'=>$args{-shutdown_behavior}) if $args{-shutdown_behavior};
+    my $block_devices = $args{-block_devices} || $args{-block_device_mapping};
+    push @param,$self->block_device_parm($block_devices);
 
     return $self->call('ModifyInstanceAttribute',@param);
 }
@@ -1649,6 +1696,11 @@ you can monitor by calling current_status():
     }
     print "volume is ready to go\n";
 
+or more simply
+
+    my $a = $ec2->attach_volume('vol-12345','i-12345','/dev/sdg');
+    $ec2->wait_for_attachments($a);
+
 =cut
 
 sub attach_volume {
@@ -1689,6 +1741,13 @@ you can monitor by calling current_status():
        sleep 2;
     }
     print "volume is ready to go\n";
+
+Or more simply:
+
+    my $a = $ec2->detach_volume('vol-12345');
+    $ec2->wait_for_attachments($a);
+    print "volume is ready to go\n" if $a->current_status eq 'detached';
+
 
 =cut
 
@@ -2600,7 +2659,7 @@ sub canonicalize {
     my $self = shift;
     my $name = shift;
     while ($name =~ /\w[A-Z]/) {
-	$name    =~ s/([a-zA-Z])([A-Z])/\L$1_$2/g;
+	$name    =~ s/([a-zA-Z])([A-Z])/\L$1_$2/g or last;
     }
     return '-'.lc $name;
 }
@@ -2795,16 +2854,22 @@ sub block_device_parm {
 	my ($devicename,$blockdevice) = ($1,$2);
 	push @p,("BlockDeviceMapping.$c.DeviceName"=>$devicename);
 
-	if ($blockdevice eq 'none') {
+	if ($blockdevice =~ /^vol-/) {  # this is a volume, and not a snapshot
+	    my ($volume,$delete_on_term) = split ':',$blockdevice;
+	    push @p,("BlockDeviceMapping.$c.Ebs.VolumeId" => $volume);
+	    push @p,("BlockDeviceMapping.$c.Ebs.DeleteOnTermination"=>$delete_on_term) 
+		if defined $delete_on_term  && $delete_on_term=~/^(true|false|1|0)$/
+	}
+	elsif ($blockdevice eq 'none') {
 	    push @p,("BlockDeviceMapping.$c.NoDevice" => '');
 	} elsif ($blockdevice =~ /^ephemeral\d$/) {
 	    push @p,("BlockDeviceMapping.$c.VirtualName"=>$blockdevice);
 	} else {
 	    my ($snapshot,$size,$delete_on_term) = split ':',$blockdevice;
-	    push @p,("BlockDeviceMapping.$c.Ebs.SnapshotId"=>$snapshot)                if $snapshot;
+	    push @p,("BlockDeviceMapping.$c.Ebs.SnapshotId" =>$snapshot)                if $snapshot;
 	    push @p,("BlockDeviceMapping.$c.Ebs.VolumeSize" =>$size)                   if $size;
 	    push @p,("BlockDeviceMapping.$c.Ebs.DeleteOnTermination"=>$delete_on_term) 
-		if $delete_on_term  && $delete_on_term=~/^(true|false|1|0)$/
+		if defined $delete_on_term  && $delete_on_term=~/^(true|false|1|0)$/
 	}
 	$c++;
     }
