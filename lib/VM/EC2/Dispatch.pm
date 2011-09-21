@@ -183,6 +183,22 @@ use constant ObjectRegistration => {
 						my $ri_id = $data->{reservedInstancesId} or return;
 						return $ec2->describe_reserved_instances($ri_id);
     },
+    CreateSpotDatafeedSubscription    => 'fetch_one,spotDatafeedSubscription,VM::EC2::Spot::DatafeedSubscription',
+    DescribeSpotDatafeedSubscription  => 'fetch_one,spotDatafeedSubscription,VM::EC2::Spot::DatafeedSubscription',
+    DeleteSpotDatafeedSubscription    => 'boolean',
+    DescribeSpotPriceHistory          => sub { my ($data,$ec2,$xmlns,$request_id) = @_;
+					       if ($ec2->{spot_price_history_token} && !$data->{nextToken}) {
+						   $ec2->{spot_price_history_stop}++;
+					       }
+					       $ec2->{spot_price_history_token} = $data->{nextToken};
+					       my $items = $data->{spotPriceHistorySet}{item} or return;
+					       load_module('VM::EC2::Spot::PriceHistory');
+					       return map {VM::EC2::Spot::PriceHistory->new($_,$ec2,$xmlns,$request_id)}
+					          @$items;
+    },
+    RequestSpotInstances              => 'fetch_items,spotInstanceRequestSet,VM::EC2::Spot::InstanceRequest',
+    CancelSpotInstanceRequests        => 'fetch_items,spotInstanceRequestSet,VM::EC2::Spot::InstanceRequest',
+    DescribeSpotInstanceRequests      => 'fetch_items,spotInstanceRequestSet,VM::EC2::Spot::InstanceRequest',
 };
 
 sub new {
@@ -281,11 +297,12 @@ sub boolean {
 
 sub fetch_one {
     my $self = shift;
-    my ($content,$ec2,$class,$nokey) = @_;
+    my ($content,$ec2,$tag,$class,$nokey) = @_;
     load_module($class);
     my $parser = $self->new_xml_parser($nokey);
     my $parsed = $parser->XMLin($content);
-    return $class->new($parsed,$ec2,@{$parsed}{'xmlns','requestId'});
+    my $obj    = $parsed->{$tag} or return;
+    return $class->new($obj,$ec2,@{$parsed}{'xmlns','requestId'});
 }
 
 =head2 @objects = $dispatch->fetch_items($raw_xml,$ec2,$container_tag,$object_class,$nokey)

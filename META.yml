@@ -2,9 +2,11 @@
 abstract: 'Control the Amazon EC2 and Eucalyptus Clouds'
 author:
   - 'Lincoln Stein <lincoln.stein@oicr.on.ca>'
+build_requires: {}
 configure_requires:
-  Module::Build: 0.36
-generated_by: 'Module::Build version 0.3607'
+  Module::Build: 0.38
+dynamic_config: 1
+generated_by: 'Module::Build version 0.38, CPAN::Meta::Converter version 2.112150'
 license: perl
 meta-spec:
   url: http://module-build.sourceforge.net/META-spec-v1.4.html
@@ -13,73 +15,124 @@ name: VM-EC2
 provides:
   VM::EC2:
     file: lib/VM/EC2.pm
-    version: 1.06
+    version: 1.07
   VM::EC2::AvailabilityZone:
     file: lib/VM/EC2/AvailabilityZone.pm
+    version: 0
   VM::EC2::BlockDevice:
     file: lib/VM/EC2/BlockDevice.pm
+    version: 0
   VM::EC2::BlockDevice::Attachment:
     file: lib/VM/EC2/BlockDevice/Attachment.pm
+    version: 0
   VM::EC2::BlockDevice::EBS:
     file: lib/VM/EC2/BlockDevice/EBS.pm
+    version: 0
   VM::EC2::BlockDevice::Mapping:
     file: lib/VM/EC2/BlockDevice/Mapping.pm
+    version: 0
   VM::EC2::BlockDevice::Mapping::EBS:
     file: lib/VM/EC2/BlockDevice/Mapping/EBS.pm
+    version: 0
   VM::EC2::Dispatch:
     file: lib/VM/EC2/Dispatch.pm
+    version: 0
   VM::EC2::ElasticAddress:
     file: lib/VM/EC2/ElasticAddress.pm
+    version: 0
   VM::EC2::Error:
     file: lib/VM/EC2/Error.pm
+    version: 0
   VM::EC2::Generic:
     file: lib/VM/EC2/Generic.pm
+    version: 0
   VM::EC2::Group:
     file: lib/VM/EC2/Group.pm
+    version: 0
   VM::EC2::Image:
     file: lib/VM/EC2/Image.pm
+    version: 0
   VM::EC2::Image::LaunchPermission:
     file: lib/VM/EC2/Image/LaunchPermission.pm
+    version: 0
   VM::EC2::Instance:
     file: lib/VM/EC2/Instance.pm
+    version: 0
   VM::EC2::Instance::ConsoleOutput:
     file: lib/VM/EC2/Instance/ConsoleOutput.pm
+    version: 0
   VM::EC2::Instance::Metadata:
     file: lib/VM/EC2/Instance/Metadata.pm
+    version: 0
   VM::EC2::Instance::MonitoringState:
     file: lib/VM/EC2/Instance/MonitoringState.pm
+    version: 0
   VM::EC2::Instance::PasswordData:
     file: lib/VM/EC2/Instance/PasswordData.pm
+    version: 0
   VM::EC2::Instance::Placement:
     file: lib/VM/EC2/Instance/Placement.pm
+    version: 0
   VM::EC2::Instance::Set:
     file: lib/VM/EC2/Instance/Set.pm
+    version: 0
   VM::EC2::Instance::State:
     file: lib/VM/EC2/Instance/State.pm
+    version: 0
   VM::EC2::Instance::State::Change:
     file: lib/VM/EC2/Instance/State/Change.pm
+    version: 0
   VM::EC2::KeyPair:
     file: lib/VM/EC2/KeyPair.pm
+    version: 0
   VM::EC2::Region:
     file: lib/VM/EC2/Region.pm
+    version: 0
   VM::EC2::ReservationSet:
     file: lib/VM/EC2/ReservationSet.pm
+    version: 0
+  VM::EC2::ReservedInstance:
+    file: lib/VM/EC2/ReservedInstance.pm
+    version: 0
+  VM::EC2::ReservedInstance::Offering:
+    file: lib/VM/EC2/ReservedInstance/Offering.pm
+    version: 0
   VM::EC2::SecurityGroup:
     file: lib/VM/EC2/SecurityGroup.pm
+    version: 0
   VM::EC2::SecurityGroup::GroupPermission:
     file: lib/VM/EC2/SecurityGroup/GroupPermission.pm
+    version: 0
   VM::EC2::SecurityGroup::IpPermission:
     file: lib/VM/EC2/SecurityGroup/IpPermission.pm
+    version: 0
   VM::EC2::Snapshot:
     file: lib/VM/EC2/Snapshot.pm
+    version: 0
   VM::EC2::Snapshot::CreateVolumePermission:
     file: lib/VM/EC2/Snapshot/CreateVolumePermission.pm
+    version: 0
+  VM::EC2::Spot::DatafeedSubscription:
+    file: lib/VM/EC2/Spot/DatafeedSubscription.pm
+    version: 0
+  VM::EC2::Spot::InstanceRequest:
+    file: lib/VM/EC2/Spot/InstanceRequest.pm
+    version: 0
+  VM::EC2::Spot::LaunchSpecification:
+    file: lib/VM/EC2/Spot/LaunchSpecification.pm
+    version: 0
+  VM::EC2::Spot::PriceHistory:
+    file: lib/VM/EC2/Spot/PriceHistory.pm
+    version: 0
   VM::EC2::State::Reason:
     file: lib/VM/EC2/Instance/State/Reason.pm
+    version: 0
   VM::EC2::Tag:
     file: lib/VM/EC2/Tag.pm
+    version: 0
   VM::EC2::Volume:
     file: lib/VM/EC2/Volume.pm
+    version: 0
 requires:
   Digest::SHA: 5.47
   LWP: 5.835
@@ -88,4 +141,4 @@ requires:
   XML::Simple: 2.18
 resources:
   license: http://dev.perl.org/licenses/
-version: 1.06
+version: 1.07
