@@ -16,7 +16,7 @@ VM::EC2::Snapshot - Object describing an Amazon EBS snapshot
       $state = $snap->status;
       $time  = $snap->startTime;
       $progress = $snap->progress;
-      $size  = $snap->size;
+      $size  = $snap->volumeSize;
       $description = $snap->description;
       $tags  = $snap->tags;
   }
@@ -180,6 +180,11 @@ creation to the owner only.
 
 See also authorized_users().
 
+=head2 $size = $image->size
+
+Alias to volumeSize, provided for consistency with
+VM::EC2::Volume->size.
+
 =head2 $snap->refresh
 
 Refreshes the snapshot from information provided by AWS. Use before
@@ -232,6 +237,8 @@ sub valid_fields {
 
 sub primary_id { shift->snapshotId }
 
+sub size { shift->volumeSize }
+
 sub from_volume {
     my $self = shift;
     my $vid = $self->volumeId or return;
@@ -262,13 +269,15 @@ sub register_image {
     # See if the root device is on the block device mapping list.
     # If it is not, then create a /dev/sda1 entry for it from this snapshot.
     my $rd = $args{-root_device_name};
-    unless (grep {/^$rd=/} @$block_devices) {
+    unless (grep {/$rd=/} @$block_devices) {
 	my $root_size   = $args{-root_size}   || '';
 	$args{-root_delete_on_termination} = 1 unless defined $args{-root_delete_on_termination};
 	my $root_delete = $args{-root_delete_on_termination} ? 'true' : 'false';
 	my $snap_id     = $self->snapshotId;
 	unshift @$block_devices,"$rd=$snap_id:$root_size:$root_delete"
     }
+
+    $args{-block_device_mapping} = $block_devices;
 
     # just cleaning up, not really necessary
     delete $args{-root_size};
