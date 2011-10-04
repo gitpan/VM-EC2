@@ -4,7 +4,7 @@
       "Lincoln Stein <lincoln.stein@oicr.on.ca>"
    ],
    "dynamic_config" : 1,
-   "generated_by" : "Module::Build version 0.38, CPAN::Meta::Converter version 2.112150",
+   "generated_by" : "Module::Build version 0.38, CPAN::Meta::Converter version 2.110930",
    "license" : [
       "perl_5"
    ],
@@ -16,7 +16,7 @@
    "prereqs" : {
       "configure" : {
          "requires" : {
-            "Module::Build" : "0.38"
+            "Module::Build" : 0
          }
       },
       "runtime" : {
@@ -32,7 +32,7 @@
    "provides" : {
       "VM::EC2" : {
          "file" : "lib/VM/EC2.pm",
-         "version" : "1.08"
+         "version" : "1.09"
       },
       "VM::EC2::AvailabilityZone" : {
          "file" : "lib/VM/EC2/AvailabilityZone.pm",
@@ -197,5 +197,5 @@
          "http://dev.perl.org/licenses/"
       ]
    },
-   "version" : "1.08"
+   "version" : "1.09"
 }
