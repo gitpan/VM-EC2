@@ -1,6 +1,8 @@
+bin/migrate-ebs-image.pl
 bin/sync_to_snapshot.pl
 Build.PL
 Changes
+DISCLAIMER.txt
 lib/VM/EC2.pm
 lib/VM/EC2/AvailabilityZone.pm
 lib/VM/EC2/BlockDevice.pm
@@ -39,8 +41,12 @@ lib/VM/EC2/Spot/DatafeedSubscription.pm
 lib/VM/EC2/Spot/InstanceRequest.pm
 lib/VM/EC2/Spot/LaunchSpecification.pm
 lib/VM/EC2/Spot/PriceHistory.pm
+lib/VM/EC2/Staging/Manager.pm
+lib/VM/EC2/Staging/Server.pm
+lib/VM/EC2/Staging/Volume.pm
 lib/VM/EC2/Tag.pm
 lib/VM/EC2/Volume.pm
+LICENSE
 Makefile.PL
 MANIFEST			This list of files
 MANIFEST.SKIP
@@ -53,4 +59,5 @@ t/03.securitygroup.t
 t/04.volume.t
 t/05.spot_instance.t
 t/06.instance.t
+t/07.staging.t
 t/lib/EC2TestSupport.pm

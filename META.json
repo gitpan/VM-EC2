@@ -4,7 +4,7 @@
       "Lincoln Stein <lincoln.stein@oicr.on.ca>"
    ],
    "dynamic_config" : 1,
-   "generated_by" : "Module::Build version 0.38, CPAN::Meta::Converter version 2.110930",
+   "generated_by" : "Module::Build version 0.38, CPAN::Meta::Converter version 2.110440",
    "license" : [
       "perl_5"
    ],
@@ -32,7 +32,7 @@
    "provides" : {
       "VM::EC2" : {
          "file" : "lib/VM/EC2.pm",
-         "version" : "1.09"
+         "version" : "1.10"
       },
       "VM::EC2::AvailabilityZone" : {
          "file" : "lib/VM/EC2/AvailabilityZone.pm",
@@ -178,6 +178,18 @@
          "file" : "lib/VM/EC2/Spot/PriceHistory.pm",
          "version" : 0
       },
+      "VM::EC2::Staging::Manager" : {
+         "file" : "lib/VM/EC2/Staging/Manager.pm",
+         "version" : 0
+      },
+      "VM::EC2::Staging::Server" : {
+         "file" : "lib/VM/EC2/Staging/Server.pm",
+         "version" : 0
+      },
+      "VM::EC2::Staging::Volume" : {
+         "file" : "lib/VM/EC2/Staging/Volume.pm",
+         "version" : 0
+      },
       "VM::EC2::State::Reason" : {
          "file" : "lib/VM/EC2/Instance/State/Reason.pm",
          "version" : 0
@@ -197,5 +209,5 @@
          "http://dev.perl.org/licenses/"
       ]
    },
-   "version" : "1.09"
+   "version" : "1.10"
 }

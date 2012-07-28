@@ -54,7 +54,7 @@ VM::EC2 - Control the Amazon EC2 and Eucalyptus Clouds
  # find instances tagged with Role=Server that are
  # stopped, change the user data and restart.
  @instances = $ec2->describe_instances({'tag:Role'       => 'Server',
-                                        'run-state-name' => 'stopped'});
+                                        'instance-state-name' => 'stopped'});
  for my $i (@instances) {
     $i->userData('Secure-mode: off');
     $i->start or warn "Couldn't start $i: ",$i->error_str;
@@ -166,17 +166,24 @@ In addition, there are several utility classes:
  VM::EC2::Error                     -- Error messages
  VM::EC2::Dispatch                  -- Maps AWS XML responses onto perl object classes
  VM::EC2::ReservationSet            -- Hidden class used for describe_instances() request;
-                                               The reservation Ids are copied into the Instance
-                                               object.
+                                        The reservation Ids are copied into the Instance
+                                         object.
+
+There is also a high-level API called "VM::EC2::Staging::Manager" for
+managing groups of staging servers and volumes which greatly
+simplifies the task of creating and updating instances that mount
+multiple volumes. The API also provides a one-line command for
+migrating EBS-backed AMIs from one zone to another. See
+L<VM::EC2::Staging::Manager>.
 
 The interface provided by these modules is based on that described at
 http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/. The
 following caveats apply:
 
  1) Not all of the Amazon API is currently implemented. Specifically,
-    calls dealing with Virtual Private Clouds (VPC), cluster management,
-    and spot instances are not currently supported.
-    See L</MISSING METHODS> for a list of all the unimplemented API calls. 
+    calls dealing with Virtual Private Clouds (VPC) and cluster
+    management, are not currently supported.  See L</MISSING METHODS>
+    for a list of all the unimplemented API calls.
 
  2) For consistency with common Perl coding practices, method calls
     are lowercase and words in long method names are separated by
@@ -347,7 +354,7 @@ use VM::EC2::Dispatch;
 use VM::EC2::Error;
 use Carp 'croak','carp';
 
-our $VERSION = '1.09';
+our $VERSION = '1.10';
 our $AUTOLOAD;
 our @CARP_NOT = qw(VM::EC2::Image    VM::EC2::Volume
                    VM::EC2::Snapshot VM::EC2::Instance
@@ -381,13 +388,20 @@ Create a new Amazon access object. Required parameters are:
 
  -endpoint     The URL for making API requests
 
+ -region       The region to make API requests
+
  -raise_error  If true, throw an exception.
 
  -print_error  If true, print errors to STDERR.
 
-One or more of -access_key, -secret_key and -endpoint can be omitted
-if the environment variables EC2_ACCESS_KEY, EC2_SECRET_KEY and
-EC2_URL are defined.
+One or more of -access_key, -secret_key can be omitted if the
+environment variables EC2_ACCESS_KEY and EC2_SECRET_KEY are
+defined. If no endpoint is specified, then the environment variable
+EC2_URL is consulted; otherwise the generic endpoint
+http://ec2.amazonaws.com/ is used. You can also select the endpoint by
+specifying one of the Amazon regions, such as "us-west-2", with the
+-region argument. The endpoint specified by -region will override
+-endpoint.
 
 To use a Eucalyptus cloud, please provide the appropriate endpoint
 URL.
@@ -417,11 +431,12 @@ sub new {
     my $secret       = $args{-secret_key} || $ENV{EC2_SECRET_KEY} 
                        or croak "Please provide SecretKey parameter or define environment variable EC2_SECRET_KEY";
     my $endpoint_url = $args{-endpoint}   || $ENV{EC2_URL} || 'http://ec2.amazonaws.com/';
-    $endpoint_url   .= '/' unless $endpoint_url =~ m!/$!;
+    $endpoint_url   .= '/'                     unless $endpoint_url =~ m!/$!;
+    $endpoint_url    = "http://".$endpoint_url unless $endpoint_url =~ m!https?://!;
 
     my $raise_error  = $args{-raise_error};
     my $print_error  = $args{-print_error};
-    return bless {
+    my $obj = bless {
 	id              => $id,
 	secret          => $secret,
 	endpoint        => $endpoint_url,
@@ -429,6 +444,13 @@ sub new {
 	raise_error     => $raise_error,
 	print_error     => $print_error,
     },ref $self || $self;
+
+    if ($args{-region}) {
+	my $region = $obj->describe_regions($args{-region}) or croak "unknown region $args{-region}";
+	$obj->endpoint($region->regionEndpoint);
+    }
+
+    return $obj;
 }
 
 =head2 $access_key = $ec2->access_key(<$new_access_key>)
@@ -468,8 +490,39 @@ Get or set the ENDPOINT URL.
 sub endpoint { 
     my $self = shift;
     my $d    = $self->{endpoint};
-    $self->{endpoint} = shift if @_;
+    if (@_) {
+	my $new_endpoint = shift;
+	$new_endpoint    = 'http://'.$new_endpoint
+	    unless $new_endpoint =~ /^https?:/;
+	$self->{endpoint} = $new_endpoint;
+    }
     $d;
+ }
+
+=head2 $region = $ec2->region(<$new_region>)
+
+Get or set the EC2 region manipulated by this module. This has the side effect
+of changing the endpoint.
+
+=cut
+
+sub region { 
+    my $self = shift;
+
+    my $d    = $self->{endpoint};
+    $d       =~ s!^https?://!!;
+    $d       =~ s!/$!!;
+
+    my @regions = $self->describe_regions;
+    my ($current_region) = grep {$_->regionEndpoint eq $d} @regions;
+
+    if (@_) {
+	my $new_region = shift;
+	my ($region) = grep {/$new_region/} @regions;
+	$region or croak "unknown region $new_region";
+	$self->endpoint($region->regionEndpoint);
+    }
+    return $current_region;
  }
 
 =head2 $ec2->raise_error($boolean)
@@ -656,8 +709,23 @@ You may omit the -filter argument name if there are no other arguments:
                             'architecture'                    => 'i386',
                              'tag:Role'                        => 'Server'});
 
-There are a large number of potential filters, which are listed at
+There are a large number of filters, which are listed in full at
 http://docs.amazonwebservices.com/AWSEC2/2011-05-15/APIReference/ApiReference-query-DescribeInstances.html.
+
+Here is a alpha-sorted list of filter names: architecture,
+availability-zone, block-device-mapping.attach-time,
+block-device-mapping.delete-on-termination,
+block-device-mapping.device-name, block-device-mapping.status,
+block-device-mapping.volume-id, client-token, dns-name, group-id,
+group-name, hypervisor, image-id, instance-id, instance-lifecycle,
+instance-state-code, instance-state-name, instance-type,
+instance.group-id, instance.group-name, ip-address, kernel-id,
+key-name, launch-index, launch-time, monitoring-state, owner-id,
+placement-group-name, platform, private-dns-name, private-ip-address,
+product-code, ramdisk-id, reason, requester-id, reservation-id,
+root-device-name, root-device-type, source-dest-check,
+spot-instance-request-id, state-reason-code, state-reason-message,
+subnet-id, tag-key, tag-value, tag:key, virtualization-type, vpc-id.
 
 Note that the objects returned from this method are the instances
 themselves, and not a reservation set. The reservation ID can be
@@ -858,7 +926,7 @@ sub run_instances {
        qw(ImageId MinCount MaxCount KeyName KernelId RamdiskId PrivateIPAddress
           InstanceInitiatedShutdownBehavior ClientToken SubnetId InstanceType);
     push @p,map {$self->list_parm($_,\%args)} qw(SecurityGroup SecurityGroupId);
-    push @p,('UserData' =>encode_base64($args{-user_data}))           if $args{-user_data};
+    push @p,('UserData' =>encode_base64($args{-user_data},''))        if $args{-user_data};
     push @p,('Placement.AvailabilityZone'=>$args{-availability_zone}) if $args{-availability_zone};
     push @p,('Placement.GroupName'=>$args{-placement_group})          if $args{-placement_group};
     push @p,('Placement.Tenancy'=>$args{-tenancy})                    if $args{-placement_tenancy};
@@ -870,6 +938,7 @@ sub run_instances {
 }
 
 =head2 @s = $ec2->start_instances(-instance_id=>\@instance_ids)
+
 =head2 @s = $ec2->start_instances(@instance_ids)
 
 Start the instances named by @instance_ids and return one or more
@@ -1267,6 +1336,8 @@ sub unmonitor_instances {
 
 =head2 $meta = $ec2->instance_metadata
 
+=head2 $meta = VM::EC2->instance_metadata
+
 B<For use on running EC2 instances only:> This method returns a
 VM::EC2::Instance::Metadata object that will return information about
 the currently running instance using the HTTP:// metadata fields
@@ -1274,6 +1345,9 @@ described at
 http://docs.amazonwebservices.com/AWSEC2/latest/UserGuide/index.html?instancedata-data-categories.html. This
 is usually fastest way to get runtime information on the current
 instance.
+
+Note that this method can be called as either an instance or a class
+method.
 
 =cut
 
@@ -2988,6 +3062,8 @@ sub request_spot_instances {
 	if $args{-availability_zone};
     push @p,('Placement.GroupName'       =>$args{-placement_group})   if $args{-placement_group};
     push @p,('LaunchSpecification.Monitoring.Enabled'   => 'true')    if $args{-monitoring};
+    push @p,('LaunchSpecification.UserData' =>
+	     encode_base64($args{-user_data},''))                     if $args{-user_data};
     return $self->call('RequestSpotInstances',@p);
 }
 
@@ -3104,6 +3180,8 @@ sub instance_parm {
     my %args;
     if ($_[0] =~ /^-/) {
 	%args = @_; 
+    } elsif (@_ > 1) {
+	%args = (-instance_id => [@_]);
     } else {
 	%args = (-instance_id => shift);
     }
@@ -3455,7 +3533,6 @@ AttachVpnGateway
 BundleInstance
 CancelBundleTask
 CancelConversionTask
-CancelSpotInstanceRequests
 ConfirmProductInstance
 CreateCustomerGateway
 CreateDhcpOptions
@@ -3465,7 +3542,6 @@ CreateNetworkAclEntry
 CreatePlacementGroup
 CreateRoute
 CreateRouteTable
-CreateSpotDatafeedSubscription
 CreateSubnet
 CreateVpc
 CreateVpnConnection
@@ -3478,7 +3554,6 @@ DeleteNetworkAclEntry
 DeletePlacementGroup
 DeleteRoute
 DeleteRouteTable
-DeleteSpotDatafeedSubscription
 DeleteSubnet
 DeleteVpc
 DeleteVpnConnection
@@ -3490,9 +3565,6 @@ DescribeDhcpOptions
 DescribeNetworkAcls
 DescribePlacementGroups
 DescribeRouteTables
-DescribeSpotDatafeedSubscription
-DescribeSpotInstanceRequests
-DescribeSpotPriceHistory
 DescribeSubnets
 DescribeVpcs
 DescribeVpnConnections
@@ -3505,7 +3577,6 @@ ReplaceNetworkAclAssociation
 ReplaceNetworkAclEntry
 ReplaceRoute
 ReplaceRouteTableAssociation
-RequestSpotInstances
 
 =head1 OTHER INFORMATION
 
@@ -3652,6 +3723,7 @@ L<VM::EC2::ReservedInstance>
 L<VM::EC2::ReservedInstance::Offering>
 L<VM::EC2::SecurityGroup>
 L<VM::EC2::Snapshot>
+L<VM::EC2::Staging::Manager>
 L<VM::EC2::Tag>
 L<VM::EC2::Volume>
 

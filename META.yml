@@ -6,7 +6,7 @@ build_requires: {}
 configure_requires:
   Module::Build: 0
 dynamic_config: 1
-generated_by: 'Module::Build version 0.38, CPAN::Meta::Converter version 2.110930'
+generated_by: 'Module::Build version 0.38, CPAN::Meta::Converter version 2.110440'
 license: perl
 meta-spec:
   url: http://module-build.sourceforge.net/META-spec-v1.4.html
@@ -15,7 +15,7 @@ name: VM-EC2
 provides:
   VM::EC2:
     file: lib/VM/EC2.pm
-    version: 1.09
+    version: 1.10
   VM::EC2::AvailabilityZone:
     file: lib/VM/EC2/AvailabilityZone.pm
     version: 0
@@ -124,6 +124,15 @@ provides:
   VM::EC2::Spot::PriceHistory:
     file: lib/VM/EC2/Spot/PriceHistory.pm
     version: 0
+  VM::EC2::Staging::Manager:
+    file: lib/VM/EC2/Staging/Manager.pm
+    version: 0
+  VM::EC2::Staging::Server:
+    file: lib/VM/EC2/Staging/Server.pm
+    version: 0
+  VM::EC2::Staging::Volume:
+    file: lib/VM/EC2/Staging/Volume.pm
+    version: 0
   VM::EC2::State::Reason:
     file: lib/VM/EC2/Instance/State/Reason.pm
     version: 0
@@ -141,4 +150,4 @@ requires:
   XML::Simple: 2.18
 resources:
   license: http://dev.perl.org/licenses/
-version: 1.09
+version: 1.10
