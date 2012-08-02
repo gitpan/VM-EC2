@@ -6,7 +6,7 @@ build_requires: {}
 configure_requires:
   Module::Build: 0
 dynamic_config: 1
-generated_by: 'Module::Build version 0.38, CPAN::Meta::Converter version 2.110440'
+generated_by: 'Module::Build version 0.38, CPAN::Meta::Converter version 2.112150'
 license: perl
 meta-spec:
   url: http://module-build.sourceforge.net/META-spec-v1.4.html
@@ -15,7 +15,7 @@ name: VM-EC2
 provides:
   VM::EC2:
     file: lib/VM/EC2.pm
-    version: 1.10
+    version: 1.11
   VM::EC2::AvailabilityZone:
     file: lib/VM/EC2/AvailabilityZone.pm
     version: 0
@@ -82,8 +82,23 @@ provides:
   VM::EC2::Instance::State::Change:
     file: lib/VM/EC2/Instance/State/Change.pm
     version: 0
+  VM::EC2::Instance::Status:
+    file: lib/VM/EC2/Instance/Status.pm
+    version: 0
+  VM::EC2::Instance::Status::Details:
+    file: lib/VM/EC2/Instance/Status/Details.pm
+    version: 0
+  VM::EC2::Instance::Status::Event:
+    file: lib/VM/EC2/Instance/Status/Event.pm
+    version: 0
+  VM::EC2::Instance::StatusItem:
+    file: lib/VM/EC2/Instance/StatusItem.pm
+    version: 0
   VM::EC2::KeyPair:
     file: lib/VM/EC2/KeyPair.pm
+    version: 0
+  VM::EC2::ProductCode:
+    file: lib/VM/EC2/ProductCode.pm
     version: 0
   VM::EC2::Region:
     file: lib/VM/EC2/Region.pm
@@ -96,6 +111,18 @@ provides:
     version: 0
   VM::EC2::ReservedInstance::Offering:
     file: lib/VM/EC2/ReservedInstance/Offering.pm
+    version: 0
+  VM::EC2::Security::Credentials:
+    file: lib/VM/EC2/Security/Credentials.pm
+    version: 0
+  VM::EC2::Security::FederatedUser:
+    file: lib/VM/EC2/Security/FederatedUser.pm
+    version: 0
+  VM::EC2::Security::Policy:
+    file: lib/VM/EC2/Security/Policy.pm
+    version: 0
+  VM::EC2::Security::Token:
+    file: lib/VM/EC2/Security/Token.pm
     version: 0
   VM::EC2::SecurityGroup:
     file: lib/VM/EC2/SecurityGroup.pm
@@ -142,6 +169,21 @@ provides:
   VM::EC2::Volume:
     file: lib/VM/EC2/Volume.pm
     version: 0
+  VM::EC2::Volume::Status:
+    file: lib/VM/EC2/Volume/Status.pm
+    version: 0
+  VM::EC2::Volume::Status::Action:
+    file: lib/VM/EC2/Volume/Status/Action.pm
+    version: 0
+  VM::EC2::Volume::Status::Details:
+    file: lib/VM/EC2/Volume/Status/Details.pm
+    version: 0
+  VM::EC2::Volume::Status::Event:
+    file: lib/VM/EC2/Volume/Status/Event.pm
+    version: 0
+  VM::EC2::Volume::StatusItem:
+    file: lib/VM/EC2/Volume/StatusItem.pm
+    version: 0
 requires:
   Digest::SHA: 5.47
   LWP: 5.835
@@ -150,4 +192,4 @@ requires:
   XML::Simple: 2.18
 resources:
   license: http://dev.perl.org/licenses/
-version: 1.10
+version: 1.11

@@ -135,7 +135,7 @@ VM::EC2 - Control the Amazon EC2 and Eucalyptus Clouds
 
 =head1 DESCRIPTION
 
-This is an interface to the 2011-05-15 version of the Amazon AWS API
+This is an interface to the 2012-06-15 version of the Amazon AWS API
 (http://aws.amazon.com/ec2). It was written provide access to the new
 tag and metadata interface that is not currently supported by
 Net::Amazon::EC2, as well as to provide developers with an extension
@@ -160,7 +160,25 @@ classes which act as specialized interfaces to AWS:
  VM::EC2::Snapshot                  -- EBS snapshots
  VM::EC2::Tag                       -- Metadata tags
 
-In addition, there are several utility classes:
+In addition, there is a high level interface for interacting with EC2
+servers and volumes, including file transfer and remote shell facilities:
+
+  VM::EC2::Staging::Manager         -- Manage a set of servers and volumes.
+  VM::EC2::Staging::Server          -- A staging server, with remote shell and file transfer
+                                        facilities.
+  VM::EC2::Staging::Volume          -- A staging volume with the ability to copy itself between
+                                        availability zones and regions.
+
+and a few specialty classes:
+
+  VM::EC2::Security::Token          -- Temporary security tokens for granting EC2 access to
+                                        non-AWS account holders.
+  VM::EC2::Security::Credentials    -- Credentials for use by temporary account holders.
+  VM::EC2::Security::Policy         -- Policies that restrict what temporary account holders
+                                        can do with EC2 resources.
+  VM::EC2::Security::FederatedUser  -- Account name information for temporary account holders.
+
+Lastly, there are several utility classes:
 
  VM::EC2::Generic                   -- Base class for all AWS objects
  VM::EC2::Error                     -- Error messages
@@ -168,6 +186,7 @@ In addition, there are several utility classes:
  VM::EC2::ReservationSet            -- Hidden class used for describe_instances() request;
                                         The reservation Ids are copied into the Instance
                                          object.
+
 
 There is also a high-level API called "VM::EC2::Staging::Manager" for
 managing groups of staging servers and volumes which greatly
@@ -354,7 +373,7 @@ use VM::EC2::Dispatch;
 use VM::EC2::Error;
 use Carp 'croak','carp';
 
-our $VERSION = '1.10';
+our $VERSION = '1.11';
 our $AUTOLOAD;
 our @CARP_NOT = qw(VM::EC2::Image    VM::EC2::Volume
                    VM::EC2::Snapshot VM::EC2::Instance
@@ -386,15 +405,18 @@ Create a new Amazon access object. Required parameters are:
 
  -secret_key   Secret key corresponding to the Access ID
 
+ -security_token Temporary security token obtained through a call to the
+               AWS Security Token Service
+
  -endpoint     The URL for making API requests
 
- -region       The region to make API requests
+ -region       The region to receive the API requests
 
  -raise_error  If true, throw an exception.
 
  -print_error  If true, print errors to STDERR.
 
-One or more of -access_key, -secret_key can be omitted if the
+One or more of -access_key or -secret_key can be omitted if the
 environment variables EC2_ACCESS_KEY and EC2_SECRET_KEY are
 defined. If no endpoint is specified, then the environment variable
 EC2_URL is consulted; otherwise the generic endpoint
@@ -402,6 +424,20 @@ http://ec2.amazonaws.com/ is used. You can also select the endpoint by
 specifying one of the Amazon regions, such as "us-west-2", with the
 -region argument. The endpoint specified by -region will override
 -endpoint.
+
+-security_token is used in conjunction with temporary security tokens
+returned by $ec2->get_federation_token() and $ec2->get_session_token()
+to grant restricted, time-limited access to some or all your EC2
+resources to users who do not have access to your account. If you pass
+either a VM::EC2::Security::Token object, or the
+VM::EC2::Security::Credentials object contained within the token
+object, then new() does not need the -access_key or -secret_key
+parameters. You may also pass a session token string scalar to
+-security_token, in which case you must also pass the access key ID
+and secret keys generated at the same time the session token was
+created. See
+http://docs.amazonwebservices.com/AWSEC2/latest/UserGuide/UsingIAM.html
+and L</AWS SECURITY TOKENS>.
 
 To use a Eucalyptus cloud, please provide the appropriate endpoint
 URL.
@@ -426,10 +462,20 @@ The error object can be retrieved with $ec2->error() as before.
 sub new {
     my $self = shift;
     my %args = @_;
-    my $id           = $args{-access_key} || $ENV{EC2_ACCESS_KEY}
-                       or croak "Please provide AccessKey parameter or define environment variable EC2_ACCESS_KEY";
-    my $secret       = $args{-secret_key} || $ENV{EC2_SECRET_KEY} 
-                       or croak "Please provide SecretKey parameter or define environment variable EC2_SECRET_KEY";
+
+    my ($id,$secret,$token);
+    if (ref $args{-security_token} && $args{-security_token}->can('access_key_id')) {
+	$id     = $args{-security_token}->access_key_id;
+	$secret = $args{-security_token}->secret_access_key;
+	$token  = $args{-security_token}->session_token;
+    }
+
+    $id           ||= $args{-access_key} || $ENV{EC2_ACCESS_KEY}
+                      or croak "Please provide -access_key parameter or define environment variable EC2_ACCESS_KEY";
+    $secret       ||= $args{-secret_key} || $ENV{EC2_SECRET_KEY}
+                      or croak "Please provide -secret_key or define environment variable EC2_SECRET_KEY";
+    $token        ||= $args{-security_token};
+
     my $endpoint_url = $args{-endpoint}   || $ENV{EC2_URL} || 'http://ec2.amazonaws.com/';
     $endpoint_url   .= '/'                     unless $endpoint_url =~ m!/$!;
     $endpoint_url    = "http://".$endpoint_url unless $endpoint_url =~ m!https?://!;
@@ -439,6 +485,7 @@ sub new {
     my $obj = bless {
 	id              => $id,
 	secret          => $secret,
+	security_token  => $token,
 	endpoint        => $endpoint_url,
 	idempotent_seed => sha1_hex(rand()),
 	raise_error     => $raise_error,
@@ -478,6 +525,19 @@ sub secret   {
     my $self = shift;
     my $d    = $self->{secret};
     $self->{secret} = shift if @_;
+    $d;
+}
+
+=head2 $secret = $ec2->security_token(<$new_token>)
+
+Get or set the temporary security token. See L</AWS SECURITY TOKENS>.
+
+=cut
+
+sub security_token   {
+    my $self = shift;
+    my $d    = $self->{security_token};
+    $self->{security_token} = shift if @_;
     $d;
 }
 
@@ -710,7 +770,7 @@ You may omit the -filter argument name if there are no other arguments:
                              'tag:Role'                        => 'Server'});
 
 There are a large number of filters, which are listed in full at
-http://docs.amazonwebservices.com/AWSEC2/2011-05-15/APIReference/ApiReference-query-DescribeInstances.html.
+http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeInstances.html.
 
 Here is a alpha-sorted list of filter names: architecture,
 availability-zone, block-device-mapping.attach-time,
@@ -806,6 +866,11 @@ VM::EC2::Instance objects.
                      $ec2->token() to generate a suitable identifier.
                      See http://docs.amazonwebservices.com/AWSEC2/
                          latest/UserGuide/Run_Instance_Idempotency.html
+  -iam_arn           The Amazon resource name (ARN) of the IAM Instance Profile (IIP)
+                       to associate with the instances.
+
+  -iam_name          The name of the IAM instance profile (IIP) to associate with the
+                       instances.
 
 =item Instance types
 
@@ -934,6 +999,7 @@ sub run_instances {
     push @p,('DisableApiTermination'=>'true')                         if $args{-termination_protection};
     push @p,('InstanceInitiatedShutdownBehavior'=>$args{-shutdown_behavior}) if $args{-shutdown_behavior};
     push @p,$self->block_device_parm($args{-block_devices}||$args{-block_device_mapping});
+    push @p,$self->iam_parm(\%args);
     return $self->call('RunInstances',@p);
 }
 
@@ -1090,6 +1156,22 @@ sub reboot_instances {
     my $c = 1;
     my @params = map {'InstanceId.'.$c++,$_} @instance_ids;
     return $self->call('RebootInstances',@params) or return;
+}
+
+=head2 $boolean = $ec2->confirm_product_instance($instance_id,$product_code)
+
+Return "true" if the instance indicated by $instance_id is associated
+with the given product code.
+
+=cut
+
+sub confirm_product_instance {
+    my $self = shift;
+    @_ == 1 or croak "Usage: confirm_product_instance(\$instance_id,\$product_code)";
+    my ($instance_id,$product_code) = @_;
+    my @params = (InstanceId=>$instance_id,
+		  ProductCode=>$product_code);
+    return $self->call('ConfirmProductInstance',@params);
 }
 
 =head2 $t = $ec2->token
@@ -1469,6 +1551,90 @@ sub reset_instance_attribute {
     return $self->call('ResetInstanceAttribute',InstanceId=>$instance_id,Attribute=>$attribute);
 }
 
+=head2 @status_list = $ec2->describe_instance_status(-instance_id=>\@ids,-filter=>\%filters,@other_args);
+
+=head2 @status_list = $ec2->describe_instance_status(@instance_ids);
+
+=head2 @status_list = $ec2->describe_instance_status(\%filters);
+
+This method returns a list of VM::EC2::Instance::Status objects
+corresponding to status checks and scheduled maintenance events on the
+instances of interest. You may provide a list of instances to return
+information on, a set of filters, or both.
+
+The filters are described at
+http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeInstanceStatus.html. The
+brief list is:
+
+availability-zone, event.code, event.description, event.not-after,
+event.not-before, instance-state-name, instance-state-code,
+system-status.status, system-status.reachability,
+instance-status.status, instance-status.reachability.
+
+Request arguments are:
+
+  -instance_id            Scalar or array ref containing the instance ID(s) to return
+                           information about (optional).
+
+  -filter                 Filters to apply (optional).
+
+  -include_all_instances  If true, include all instances, including those that are 
+                           stopped, pending and shutting down. Otherwise, returns
+                           the status of running instances only.
+
+ -max_results             An integer corresponding to the number of instance items
+                           per response (must be greater than 5).
+
+If -max_results is specified, then the call will return at most the
+number of instances you requested. You may see whether there are additional
+results by calling more_instance_status(), and then retrieve the next set of
+results with additional call(s) to describe_instance_status():
+
+ my @results = $ec2->describe_instance_status(-max_results => 10);
+ do_something(\@results);
+ while ($ec2->more_instance_status) {
+    @results = $ec2->describe_instance_status;
+    do_something(\@results);
+ }
+
+NOTE: As of 29 July 2012, passing -include_all_instances causes an EC2
+"unknown parameter" error, indicating some mismatch between the
+documented API and the actual one.
+
+=cut
+
+sub more_instance_status {
+    my $self = shift;
+    return $self->{instance_status_token} &&
+           !$self->{instance_status_stop};
+}
+
+sub describe_instance_status {
+    my $self = shift;
+    my @parms;
+
+    if (!@_ && $self->{instance_status_token} && $self->{instance_status_args}) {
+	@parms = (@{$self->{instance_status_args}},NextToken=>$self->{instance_status_token});
+    }
+    
+    else {
+	my %args = $self->args('-instance_id',@_);
+	push @parms,$self->list_parm('InstanceId',\%args);
+	push @parms,$self->filter_parm(\%args);
+	push @parms,$self->boolean_parm('IncludeAllInstances',\%args);
+	push @parms,$self->single_parm('MaxResults',\%args);
+	
+	if ($args{-max_results}) {
+	    $self->{instance_status_token} = 'xyzzy'; # dummy value
+	    $self->{instance_status_args} = \@parms;
+	}
+
+    }
+    return $self->call('DescribeInstanceStatus',@parms);
+}
+
+
+
 =head1 EC2 AMAZON MACHINE IMAGES
 
 The methods in this section allow you to query and manipulate Amazon
@@ -1487,7 +1653,8 @@ AMI. Optional parameters:
 
  -executable_by   Filter by images executable by the indicated user account
 
- -owner           Filter by owner account
+ -owner           Filter by owner account number or one of the aliases "self",
+                    "aws-marketplace" or "amazon".
 
  -filter          Tags and other filters to apply
 
@@ -1496,7 +1663,7 @@ name and call describe_images() with a single hashref consisting of
 the search filters you wish to apply.
 
 The full list of image filters can be found at:
-http://docs.amazonwebservices.com/AWSEC2/2011-05-15/APIReference/ApiReference-query-DescribeImages.html
+http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeImages.html
 
 =cut
 
@@ -1749,7 +1916,7 @@ The -filter argument name can be omitted if there are no other
 arguments you wish to pass.
 
 The full list of volume filters can be found at:
-http://docs.amazonwebservices.com/AWSEC2/2011-05-15/APIReference/ApiReference-query-DescribeVolumes.html
+http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeVolumes.html
 
 =cut
 
@@ -1900,6 +2067,125 @@ sub detach_volume {
     return $self->call('DetachVolume',@param) or return;
 }
 
+=head2 @v = $ec2->describe_volume_status(-volume_id=>\@ids,-filter=>\%filters)
+
+=head2 @v = $ec2->describe_volume_status(@volume_ids)
+
+=head2 @v = $ec2->describe_volume_status(\%filters)
+
+Return a series of VM::EC2::Volume::StatusItem objects. Optional parameters:
+
+ -volume_id    The id of the volume to fetch, either a string
+               scalar or an arrayref.
+
+ -filter       One or more filters to apply to the search
+
+ -max_results  Maximum number of items to return (must be more than
+                5).
+
+The -filter argument name can be omitted if there are no other
+arguments you wish to pass.
+
+The full list of volume filters can be found at:
+http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeVolumeStatus.html
+
+If -max_results is specified, then the call will return at most the
+number of volume status items you requested. You may see whether there
+are additional results by calling more_volume_status(), and then
+retrieve the next set of results with additional call(s) to
+describe_volume_status():
+
+ my @results = $ec2->describe_volume_status(-max_results => 10);
+ do_something(\@results);
+ while ($ec2->more_volume_status) {
+    @results = $ec2->describe_volume_status;
+    do_something(\@results);
+ }
+
+=cut
+
+sub more_volume_status {
+    my $self = shift;
+    return $self->{volume_status_token} &&
+           !$self->{volume_status_stop};
+}
+
+sub describe_volume_status {
+    my $self = shift;
+    my @parms;
+
+    if (!@_ && $self->{volume_status_token} && $self->{volume_status_args}) {
+	@parms = (@{$self->{volume_status_args}},NextToken=>$self->{volume_status_token});
+    }
+    
+    else {
+	my %args = $self->args('-volume_id',@_);
+	push @parms,$self->list_parm('VolumeId',\%args);
+	push @parms,$self->filter_parm(\%args);
+	push @parms,$self->single_parm('MaxResults',\%args);
+	
+	if ($args{-max_results}) {
+	    $self->{volume_status_token} = 'xyzzy'; # dummy value
+	    $self->{volume_status_args} = \@parms;
+	}
+
+    }
+    return $self->call('DescribeVolumeStatus',@parms);
+}
+
+=head2 @data = $ec2->describe_volume_attribute($volume_id,$attribute)
+
+This method returns volume attributes.  Only one attribute can be
+retrieved at a time. The following is the list of attributes that can be
+retrieved:
+
+ autoEnableIO                      -- boolean
+ productCodes                      -- list of scalar
+
+These values can be retrieved more conveniently from the
+L<VM::EC2::Volume> object returned from describe_volumes():
+
+ $volume->auto_enable_io(1);
+ @codes = $volume->product_codes;
+
+=cut
+
+sub describe_volume_attribute {
+    my $self = shift;
+    @_ == 2 or croak "Usage: describe_volume_attribute(\$instance_id,\$attribute_name)";
+    my ($instance_id,$attribute) = @_;
+    my @param  = (VolumeId=>$instance_id,Attribute=>$attribute);
+    my $result = $self->call('DescribeVolumeAttribute',@param);
+    return $result && $result->attribute($attribute);
+}
+
+sub modify_volume_attribute {
+    my $self = shift;
+    my $volume_id = shift or croak "Usage: modify_volume_attribute(\$volumeId,%param)";
+    my %args   = @_;
+    my @param  = (VolumeId=>$volume_id);
+    push @param,('AutoEnableIO.Value'=>$args{-auto_enable_io} ? 'true':'false');
+    return $self->call('ModifyVolumeAttribute',@param);
+}
+
+=head2 $boolean = $ec2->enable_volume_io(-volume_id=>$volume_id)
+
+=head2 $boolean = $ec2->enable_volume_io($volume_id)
+
+Given the ID of a volume whose I/O has been disabled (e.g. due to
+hardware degradation), this method will reenable the I/O and return
+true if successful.
+
+=cut
+
+sub enable_volume_io {
+    my $self = shift;
+    my %args = $self->args('-volume_id',@_);
+    $args{-volume_id} or croak "Usage: enable_volume_io(\$volume_id)";
+    my @param = $self->single_parm('VolumeId',\%args);
+    return $self->call('EnableVolumeIO',@param);
+}
+
 =head2 @snaps = $ec2->describe_snapshots(-snapshot_id=>\@ids,%other_param)
 
 =head2 @snaps = $ec2->describe_snapshots(@snapshot_ids)
@@ -1920,7 +2206,7 @@ The -filter argument name can be omitted if there are no other
 arguments you wish to pass.
 
 The full list of applicable filters can be found at
-http://docs.amazonwebservices.com/AWSEC2/2011-05-15/APIReference/ApiReference-query-DescribeSnapshots.html
+http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeSnapshots.html
 
 =cut
 
@@ -1940,9 +2226,11 @@ sub describe_snapshots {
 
 This method returns snapshot attributes. The first argument is the
 snapshot ID, and the second is the name of the attribute to
-fetch. Currently Amazon defines only one attribute,
-"createVolumePermission", which will return a list of user Ids who are
-allowed to create volumes from this snapshot.
+fetch. Currently Amazon defines two attributes:
+
+ createVolumePermission   -- return a list of user Ids who are
+                             allowed to create volumes from this snapshot.
+ productCodes             -- product codes for this snapshot
 
 The result is a raw hash of attribute values. Please see
 L<VM::EC2::Snapshot> for a more convenient way of accessing and
@@ -2103,7 +2391,7 @@ The -filter argument name can be omitted if there are no other
 arguments you wish to pass.
 
 The full list of security group filters can be found at:
-http://docs.amazonwebservices.com/AWSEC2/2011-05-15/APIReference/ApiReference-query-DescribeSecurityGroups.html
+http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeSecurityGroups.html
 
 =cut
 
@@ -2305,7 +2593,7 @@ Optional parameters:
  -filter          Filter on tags and other attributes.
 
 The full list of key filters can be found at:
-http://docs.amazonwebservices.com/AWSEC2/2011-05-15/APIReference/ApiReference-query-DescribeKeyPairs.html
+http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeKeyPairs.html
 
 =cut
 
@@ -2438,7 +2726,7 @@ Return a series of VM::EC2::Tag objects, each describing an
 AMI. A single optional -filter argument is allowed.
 
 Available filters are: key, resource-id, resource-type and value. See
-http://docs.amazonwebservices.com/AWSEC2/2011-05-15/APIReference/ApiReference-query-DescribeTags.html
+http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeTags.html
 
 =cut
 
@@ -2548,7 +2836,7 @@ you. All parameters are optional:
                    on.
 
 The list of applicable filters can be found at
-http://docs.amazonwebservices.com/AWSEC2/2011-05-15/APIReference/ApiReference-query-DescribeAddresses.html.
+http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeAddresses.html.
 
 This method returns a list of L<VM::EC2::ElasticAddress>.
 
@@ -2688,9 +2976,13 @@ arguments are treated as Reserved Instance Offering IDs.
                                    offering, either "default" or
                                    "dedicated". (VPC instances only)
 
+ -offering_type                  The reserved instance offering type, one of
+                                   "Heavy Utilization", "Medium Utilization",
+                                   or "Light Utilization".
+
  -filter                          A set of filters to apply.
 
-For available filters, see http://docs.amazonwebservices.com/AWSEC2/2011-05-15/APIReference/ApiReference-query-DescribeReservedInstancesOfferings.html.
+For available filters, see http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeReservedInstancesOfferings.html.
 
 The returned objects are of type L<VM::EC2::ReservedInstance::Offering>
 
@@ -2714,7 +3006,8 @@ sub describe_reserved_instances_offerings {
     push @param,$self->single_parm('ProductDescription',\%args);
     push @param,$self->single_parm('InstanceType',\%args);
     push @param,$self->single_parm('AvailabilityZone',\%args);
-    push @param,$self->single_parm('InstanceTenancy',\%args);  # should initial "i" be upcase?
+    push @param,$self->single_parm('instanceTenancy',\%args);  # should initial "i" be upcase?
+    push @param,$self->single_parm('offeringType',\%args);     # should initial "o" be upcase?
     push @param,$self->filter_parm(\%args);
     return $self->call('DescribeReservedInstancesOfferings',@param);
 }
@@ -2769,7 +3062,7 @@ arguments are treated as Reserved Instance  IDs.
 
  -filter                -- A set of filters to apply.
 
-For available filters, see http://docs.amazonwebservices.com/AWSEC2/2011-05-15/APIReference/ApiReference-query-DescribeReservedInstances.html.
+For available filters, see http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeReservedInstances.html.
 
 The returned objects are of type L<VM::EC2::ReservedInstance>
 
@@ -2920,11 +3213,6 @@ sub describe_spot_price_history {
     my $self = shift;
     my @parms;
 
-    if ($self->{spot_price_history_stop}) {
-	delete $self->{spot_price_history_stop};
-	return;
-    }
-
     if (!@_ && $self->{spot_price_history_token} && $self->{price_history_args}) {
 	@parms = (@{$self->{price_history_args}},NextToken=>$self->{spot_price_history_token});
     }
@@ -3025,11 +3313,21 @@ objects, one for each instance specified in -instance_count.
 
   -monitoring        Pass a true value to enable detailed monitoring.
 
-  -subnet_id         Subnet ID in which to place instances launched under
-                      this request (VPC only).
+  -subnet            The ID of the Amazon VPC subnet in which to launch the
+                      spot instance (VPC only).
+
+  -subnet_id         deprecated
 
   -addressing_type   Deprecated and undocumented, but present in the
                        current EC2 API documentation.
+
+  -iam_arn           The Amazon resource name (ARN) of the IAM Instance Profile (IIP)
+                       to associate with the instances.
+
+  -iam_name          The name of the IAM instance profile (IIP) to associate with the
+                       instances.
+
+NOTE: The network interface specification is currently not supported.
 
 =cut
 
@@ -3044,7 +3342,7 @@ sub request_spot_instances {
     $args{-availability_zone} ||= $args{-placement_zone};
 
     my @p = map {$self->single_parm($_,\%args)}
-            qw(SpotPrice InstanceCount Type ValidFrom ValidUntil LaunchGroup AvailabilityZoneGroup);
+            qw(SpotPrice InstanceCount Type ValidFrom ValidUntil LaunchGroup AvailabilityZoneGroup Subnet);
 
     # oddly enough, the following args need to be prefixed with "LaunchSpecification."
     my @launch_spec = map {$self->single_parm($_,\%args)}
@@ -3052,13 +3350,14 @@ sub request_spot_instances {
     push @launch_spec, map {$self->list_parm($_,\%args)}
          qw(SecurityGroup SecurityGroupId);
     push @launch_spec, $self->block_device_parm($args{-block_devices}||$args{-block_device_mapping});
+    push @launch_spec,$self->iam_parm(\%args);
 
     while (my ($key,$value) = splice(@launch_spec,0,2)) {
 	push @p,("LaunchSpecification.$key" => $value);
     }
     
     # a few more oddballs
-    push @p,('LaunchSpecification.Placement.AvailabilityZone'=>$args{-availability_zone})
+    push @p,('LaunchSpecification.Placement.AvailabilityZone'=> $args{-availability_zone})
 	if $args{-availability_zone};
     push @p,('Placement.GroupName'       =>$args{-placement_group})   if $args{-placement_group};
     push @p,('LaunchSpecification.Monitoring.Enabled'   => 'true')    if $args{-monitoring};
@@ -3099,7 +3398,8 @@ Optional parameters:
 
  -filter                     -- Tags and other filters to apply.
 
-There are many filters available, described fully at http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/index.html?ApiReference-ItemType-SpotInstanceRequestSetItemType.html:
+There are many filters available, described fully at
+http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/index.html?ApiReference-ItemType-SpotInstanceRequestSetItemType.html:
 
     availability-zone-group
     create-time
@@ -3142,7 +3442,162 @@ sub describe_spot_instance_requests {
 }
 
 
+=head1 AWS SECURITY TOKENS
 
+AWS security tokens provide a way to grant temporary access to
+resources in your EC2 space without giving them permanent
+accounts. They also provide the foundation for mobile services and
+multifactor authentication devices (MFA).
+
+Used in conjunction with VM::EC2::Security::Policy and
+VM::EC2::Security::Credentials, you can create a temporary user who is
+authenticated for a limited length of time and pass the credentials to
+him or her via a secure channel. He or she can then create a
+credentials object to access your AWS resources.
+
+Here is an example:
+
+ # on your side of the connection
+ $ec2 = VM::EC2->new(...);  # as usual
+ my $policy = VM::EC2::Security::Policy->new;
+ $policy->allow('DescribeImages','RunInstances');
+ my $token = $ec2->get_federation_token(-name     => 'TemporaryUser',
+                                        -duration => 60*60*3, # 3 hrs, as seconds
+                                        -policy   => $policy);
+ my $serialized = $token->credentials->serialize;
+ send_data_to_user_somehow($serialized);
+
+ # on the temporary user's side of the connection
+ my $serialized = get_data_somehow();
+ my $token = VM::EC2::Security::Credentials->new_from_serialized($serialized);
+ my $ec2   = VM::EC2->new(-security_token => $token);
+ print $ec2->describe_images(-owner=>'self');
+
+For temporary users who are not using the Perl VM::EC2 API, you can
+transmit the required fields individually:
+
+ my $credentials   = $token->credentials;
+ my $access_key_id = $credentials->accessKeyId;
+ my $secret_key    = $credentials->secretKey;
+ my $session_token = $credentials->sessionToken;
+ send_data_to_user_somehow($session_token,
+                           $access_key_id,
+                           $secret_key);
+
+Calls to get_federation_token() return a VM::EC2::Security::Token
+object. This object contains two sub-objects, a
+VM::EC2::Security::Credentials object, and a
+VM::EC2::Security::FederatedUser object. The Credentials object
+contains a temporary access key ID, secret access key, and session
+token which together can be used to authenticate to the EC2 API.  The
+FederatedUser object contains the temporary user account name and ID.
+
+See L<VM::EC2::Security::Token>, L<VM::EC2::Security::FederatedUser>,
+L<VM::EC2::Security::Credentials>, and L<VM::EC2::Security::Policy>.
+
+=cut
+
+=head2 $token = $ec2->get_federation_token($username)
+
+=head2 $token = $ec2->get_federation_token(-name=>$username,@args)
+
+This method creates a new temporary user under the provided username
+and returns a VM::EC2::Security::Token object that contains temporary
+credentials for the user, as well as information about the user's
+account. Other options allow you to control the duration for which the
+credentials will be valid, and the policy the controls what resources
+the user is allowed to access.
+
+=over 4
+
+=item Required parameters:
+
+ -name The username
+
+The username must comply with the guidelines described in
+http://docs.amazonwebservices.com/IAM/latest/UserGuide/LimitationsOnEntities.html:
+essentially all alphanumeric plus the characters [+=,.@-].
+
+=item Optional parameters:
+
+ -duration_seconds Length of time the session token will be valid for,
+                    expressed in seconds. 
+
+ -duration         Same thing, faster to type.
+
+ -policy           A VM::EC2::Security::Policy object, or a JSON string
+                     complying with the IAM policy syntax.
+
+The duration must be no shorter than 1 hour (3600 seconds) and no
+longer than 36 hours (129600 seconds). If no duration is specified,
+Amazon will default to 12 hours. If no policy is provided, then the
+user will not be able to execute B<any> actions.
+
+Note that if the temporary user wishes to create a VM::EC2 object and
+specify a region name at create time
+(e.g. VM::EC2->new(-region=>'us-west-1'), then the user must have
+access to the DescribeRegions action:
+
+ $policy->allow('DescribeRegions')
+
+Otherwise the call to new() will fail.
+
+=back
+
+=cut
+
+sub get_federation_token {
+    my $self = shift;
+    my %args = $self->args('-name',@_);
+    $args{-name} or croak "Usage: get_federation_token(-name=>\$name,\@more_args)";
+    $args{-duration_seconds} ||= $args{-duration};
+    my @p = map {$self->single_parm($_,\%args)} qw(Name DurationSeconds Policy);
+    return $self->sts_call('GetFederationToken',@p);
+}
+
+
+=head2 $token = $ec2->get_session_token(@args)
+
+This method creates a temporary VM::EC2::Security::Token object for an
+anonymous user. The token has no policy associated with it, and can be
+used to run any of the EC2 actions available to the user who created
+the token. Optional arguments allow the session token to be used in
+conjunction with MFA devices.
+
+=over 4
+
+=item Required parameters:
+
+none
+
+=item Optional parameters:
+
+ -duration_seconds Length of time the session token will be valid for,
+                    expressed in seconds.
+
+ -duration         Same thing, faster to type.
+
+ -serial_number    The identification number of the user's MFA device,
+                     if any.
+
+ -token_code       The code provided by the MFA device, if any.
+
+If no duration is specified, Amazon will default to 12 hours.
+
+See
+http://docs.amazonwebservices.com/IAM/latest/UserGuide/Using_ManagingMFA.html
+for information on using AWS in conjunction with MFA devices.
+
+=back
+
+=cut
+
+sub get_session_token {
+    my $self = shift;
+    my %args = @_;
+    my @p = map {$self->single_parm($_,\%args)} qw(SerialNumber DurationSeconds TokenCode);
+    return $self->sts_call('GetSessionToken',@p);
+}
 
 # ------------------------------------------------------------------------------------------
 
@@ -3266,7 +3721,7 @@ sub tagdelete_parm {
     return $self->key_value_parameters('Tag','Key','Value',$args,1);
 }
 
-=head2 @parameters = $ec2->key_value_parm($param_name,$keyname,$valuename,\%args,$skip_undef_values)
+=head2 @parameters = $ec2->key_value_parameters($param_name,$keyname,$valuename,\%args,$skip_undef_values)
 
 =cut
 
@@ -3338,6 +3793,19 @@ sub _perm_parm {
     return @param;
 }
 
+=head2 @parameters = $ec2->iam_parm($args)
+
+=cut
+
+sub iam_parm {
+    my $self = shift;
+    my $args = shift;
+    my @p;
+    push @p,('IamInstanceProfile.Arn'  => $args->{-iam_arn})             if $args->{-iam_arn};
+    push @p,('IamInstanceProfile.Name' => $args->{-iam_name})            if $args->{-iam_name};
+    return @p;
+}
+
 =head2 @parameters = $ec2->block_device_parm($block_device_mapping_string)
 
 =cut
@@ -3393,7 +3861,11 @@ API version.
 
 =cut
 
-sub version  { '2011-05-15'      }
+#sub version  { '2011-12-15'      }
+sub version  { 
+    my $self = shift;
+    return $self->{version} ||=  '2012-06-15';
+}
 
 =head2 $ts = $ec2->timestamp
 
@@ -3456,6 +3928,13 @@ sub call {
     }
 }
 
+sub sts_call {
+    my $self = shift;
+    local $self->{endpoint} = 'https://sts.amazonaws.com';
+    local $self->{version}  = '2011-06-15';
+    $self->call(@_);
+}
+
 =head2 $request = $ec2->make_request($action,@param);
 
 Set up the signed HTTP::Request object.
@@ -3490,6 +3969,7 @@ sub _sign {
     $sign_hash{Version}          = $self->version;
     $sign_hash{SignatureVersion} = 2;
     $sign_hash{SignatureMethod}  = 'HmacSHA256';
+    $sign_hash{SecurityToken}    = $self->security_token if $self->security_token;
 
     my @param;
     my @parameter_keys = sort keys %sign_hash;
@@ -3524,21 +4004,23 @@ sub args {
 
 =head1 MISSING METHODS
 
-As of 27 July 2011, the following Amazon API calls were NOT implemented:
+As of 30 July 2012, the following Amazon API calls were NOT
+implemented. Volumteers to implement these calls are most welcome.
 
 AssociateDhcpOptions
 AssociateRouteTable
 AttachInternetGateway
+AttachNetworkInterface
 AttachVpnGateway
 BundleInstance
 CancelBundleTask
 CancelConversionTask
-ConfirmProductInstance
 CreateCustomerGateway
 CreateDhcpOptions
 CreateInternetGateway
 CreateNetworkAcl
 CreateNetworkAclEntry
+CreateNetworkInterface
 CreatePlacementGroup
 CreateRoute
 CreateRouteTable
@@ -3551,6 +4033,7 @@ DeleteDhcpOptions
 DeleteInternetGateway
 DeleteNetworkAcl
 DeleteNetworkAclEntry
+DeleteNetworkInterface
 DeletePlacementGroup
 DeleteRoute
 DeleteRouteTable
@@ -3563,6 +4046,8 @@ DescribeConversionTasks
 DescribeCustomerGateways
 DescribeDhcpOptions
 DescribeNetworkAcls
+DescribeNetworkInterfaces
+DescribeNetworkInterfaceAttribute
 DescribePlacementGroups
 DescribeRouteTables
 DescribeSubnets
@@ -3570,13 +4055,17 @@ DescribeVpcs
 DescribeVpnConnections
 DescribeVpnGateways
 DetachInternetGateway
+DetachNetworkInterface
 DetachVpnGateway
 DisassociateRouteTable
 ImportInstance
+ImportVolume
+ModifyNetworkInterfaceAttribute
 ReplaceNetworkAclAssociation
 ReplaceNetworkAclEntry
 ReplaceRoute
 ReplaceRouteTableAssociation
+ResetNetworkInterfaceAttribute
 
 =head1 OTHER INFORMATION
 
@@ -3584,12 +4073,11 @@ This section contains technical information that may be of interest to developer
 
 =head2 Signing and authentication protocol
 
-This module uses Amazon AWS signing protocol version 2, as described
-at
-http://docs.amazonwebservices.com/AWSEC2/latest/UserGuide/index.html?using-query-api.html. It
-uses the HmacSHA256 signature method, which is the most secure method
-currently available. For additional security, use "https" for the
-communications endpoint:
+This module uses Amazon AWS signing protocol version 2, as described at
+http://docs.amazonwebservices.com/AWSEC2/latest/UserGuide/index.html?using-query-api.html.
+It uses the HmacSHA256 signature method, which is the most secure
+method currently available. For additional security, use "https" for
+the communications endpoint:
 
   $ec2 = VM::EC2->new(-endpoint=>'https://ec2.amazonaws.com');
 

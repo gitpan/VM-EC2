@@ -348,6 +348,10 @@ you can monitor by calling current_status():
     }
     print "volume is ready to go\n";
 
+=head2 $boolean = $instance->confirm_product_code($product_code)
+
+Return true if this instance is associated with the given product code.
+
 =head1 ACCESSING INSTANCE METADATA
 
 =head2 $meta = $instance->metadata
@@ -397,6 +401,7 @@ use VM::EC2::Instance::State;
 use VM::EC2::Instance::State::Reason;
 use VM::EC2::BlockDevice::Mapping;
 use VM::EC2::Instance::Placement;
+use VM::EC2::ProductCode;
 use MIME::Base64 qw(encode_base64 decode_base64);
 use Carp 'croak';
 
@@ -759,7 +764,13 @@ sub metadata {
 sub productCodes {
     my $self = shift;
     my $codes = $self->SUPER::productCodes or return;
-    return map {$_->{productCode}} @{$codes->{item}};
+    return map {VM::EC2::ProductCode->new($_)} @{$codes->{item}};
+}
+
+sub confirm_product_code {
+    my $self = shift;
+    my $code = shift;
+    return $self->aws->confirm_product_instance($self,$code);
 }
 
 1;

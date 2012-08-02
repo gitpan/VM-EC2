@@ -222,6 +222,7 @@ use base 'VM::EC2::Generic';
 use VM::EC2::BlockDevice;
 use VM::EC2::Image::LaunchPermission;
 use VM::EC2::Instance::State::Reason;
+use VM::EC2::ProductCode;
 
 use Carp 'croak';
 
@@ -245,8 +246,12 @@ sub stateReason {
 
 sub productCodes {
     my $self = shift;
-    my $codes = $self->SUPER::productCodes or return;
-    return map {$_->{productCode}} @{$codes->{item}};
+    if (@_) {
+	$self->aws->modify_image_attribute($self,-product_code=>\@_);
+    } else {
+	my $codes = $self->SUPER::productCodes or return;
+	return map {VM::EC2::ProductCode->new($_)} @{$codes->{item}};
+    }
 }
 
 sub blockDeviceMapping {
