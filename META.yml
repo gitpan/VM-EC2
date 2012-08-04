@@ -6,7 +6,7 @@ build_requires: {}
 configure_requires:
   Module::Build: 0
 dynamic_config: 1
-generated_by: 'Module::Build version 0.38, CPAN::Meta::Converter version 2.112150'
+generated_by: 'Module::Build version 0.38, CPAN::Meta::Converter version 2.110440'
 license: perl
 meta-spec:
   url: http://module-build.sourceforge.net/META-spec-v1.4.html
@@ -15,7 +15,7 @@ name: VM-EC2
 provides:
   VM::EC2:
     file: lib/VM/EC2.pm
-    version: 1.11
+    version: 1.12
   VM::EC2::AvailabilityZone:
     file: lib/VM/EC2/AvailabilityZone.pm
     version: 0
@@ -192,4 +192,4 @@ requires:
   XML::Simple: 2.18
 resources:
   license: http://dev.perl.org/licenses/
-version: 1.11
+version: 1.12
