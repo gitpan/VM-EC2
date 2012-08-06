@@ -298,11 +298,11 @@ sub start {
 	local $SIG{ALRM} = sub {die 'timeout'};
 	alarm(VM::EC2::Staging::Manager::SERVER_STARTUP_TIMEOUT());
 	$self->ec2->start_instances($self);
-	$self->manager->wait_for_instances($self);
+	$self->manager->wait_for_servers($self);
     };
     alarm(0);
     if ($@) {
-	$self->manager->info('could not start $self');
+	$self->manager->warn("could not start $self\n");
 	return;
     }
     $self->is_up(1);
@@ -641,8 +641,8 @@ synchronizing a filesystem somewhere to an EBS snapshot:
 
 The B<-label> and B<-uuid> arguments are used to set the volume label
 and UUID during formatting of new filesystems. The default behavior is
-to create a label based on the symbolic name, if any, and to allow the
-server to choose an arbitrary UUID.
+to create no label and to allow the server to choose an arbitrary
+UUID.
 
 =cut
 
@@ -655,7 +655,7 @@ sub provision_volume {
     my $volid  = $args{-volume_id};
     my $snapid = $args{-snapshot_id};
     my $reuse  = $args{-reuse};
-    my $label  = $args{-label} || $args{-name};
+    my $label  = $args{-label};
     my $uuid   = $args{-uuid};
 
     $self->manager->find_volume_by_name($args{-name}) && 
@@ -701,15 +701,16 @@ sub provision_volume {
 	$self->ssh("sudo /sbin/resize2fs $mt_device ${size}G") or croak "Couldn't resize $mt_device";
     } elsif ($needs_mkfs && $fstype ne 'raw') {
 	local $_ = $fstype;
-	my $label = /^ext/     ? "-L '$label'"
-                   :/^xfs/     ? "-L '$label'"
-                   :/^reiser/  ? "-l '$label'"
-                   :/^jfs/     ? "-L '$label'"
-                   :/^vfat/    ? "-n '$label'"
-                   :/^msdos/   ? "-n '$label'"
-                   :/^ntfs/    ? "-L '$label'"
-		   :/^hfs/     ? "-v '$label'"
-                   :'';
+	my $label_cmd =!$label     ? ''
+                       :/^ext/     ? "-L '$label'"
+                       :/^xfs/     ? "-L '$label'"
+                       :/^reiser/  ? "-l '$label'"
+                       :/^jfs/     ? "-L '$label'"
+                       :/^vfat/    ? "-n '$label'"
+                       :/^msdos/   ? "-n '$label'"
+                       :/^ntfs/    ? "-L '$label'"
+		       :/^hfs/     ? "-v '$label'"
+                       :'';
 	my $uu = $uuid ? ( /^ext/     ? "-U $uuid"
 			  :/^xfs/     ? ''
 			  :/^reiser/  ? "-u $uuid"
@@ -728,7 +729,7 @@ sub provision_volume {
 	    $self->ssh("if [ ! -e /sbin/mkfs.$fstype ]; then sudo apt-get update; sudo apt-get -y install $package; fi");
 	}
 	$self->info("Making $fstype filesystem on staging volume...\n");
-	$self->ssh("sudo /sbin/mkfs.$fstype $quiet $label $uu $mt_device") or croak "Couldn't make filesystem on $mt_device";
+	$self->ssh("sudo /sbin/mkfs.$fstype $quiet $label_cmd $uu $mt_device") or croak "Couldn't make filesystem on $mt_device";
 
 	if ($uuid && !$uu) {
 	    $self->info("Setting the UUID for the volume\n");
@@ -852,7 +853,7 @@ This method will die in case of error.
 sub mount_volume {
     my $self = shift;
     my ($vol,$mtpt)  = @_;
-    $vol->mounted and croak "$vol already mounted";
+    $vol->mounted and return;
     if ($vol->mtdev && $vol->mtpt) {
 	return if $vol->mtpt eq 'none';
 	$self->_mount($vol->mtdev,$vol->mtpt);
@@ -1028,18 +1029,18 @@ sub _find_or_create_mount {
     my ($vol,$mtpt)  = @_;
 
     $vol->refresh;
-    my ($ebs_device,$mt_device);
+    my ($ebs_device,$mt_device,$old_mtpt);
     
     # handle the case of the volme already being attached
     if (my $attachment = $vol->attachment) {
+
 	if ($attachment->status eq 'attached') {
+
 	    $attachment->instanceId eq $self->instanceId or
 		die "$vol is attached to wrong server";
-	    ($mt_device,$mtpt) = $self->_find_mount($attachment->device);
-	    unless ($mtpt) {
-		$mtpt ||= $vol->tags->{StagingMtPt} || $self->default_mtpt($vol);
-		$self->_mount($mt_device,$mtpt);
-	    }
+	    ($mt_device,$old_mtpt) = $self->_find_mount($attachment->device);
+	    $mtpt ||= $old_mtpt || $vol->tags->{StagingMtPt} || $self->default_mtpt($vol);
+	    $self->_mount($mt_device,$mtpt);
 
 	    #oops, device is in a semi-attached state. Let it settle then reattach.
 	} else {

@@ -15,7 +15,7 @@ name: VM-EC2
 provides:
   VM::EC2:
     file: lib/VM/EC2.pm
-    version: 1.12
+    version: 1.13
   VM::EC2::AvailabilityZone:
     file: lib/VM/EC2/AvailabilityZone.pm
     version: 0
@@ -192,4 +192,4 @@ requires:
   XML::Simple: 2.18
 resources:
   license: http://dev.perl.org/licenses/
-version: 1.12
+version: 1.13
