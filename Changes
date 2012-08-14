@@ -1,3 +1,8 @@
+1.15 Tue Aug 14 07:18:04 EDT 2012
+    - Allow ephemeral storage to be specified in migrate-ebs-image.pl using the -b argument.
+    - Add -block_device_mapping option to create_image().
+    - Add volumeType() and iops() methods to VM::EC2::Volume.
+
 1.14 Fri Aug 10 07:19:44 EDT 2012
     - Fix bug in snapshot creation that was causing migrate-ebs-image.pl to fail on
       last step.
