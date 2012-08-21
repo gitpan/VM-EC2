@@ -115,6 +115,13 @@ These object methods are supported:
                    with VPC NAT functionality. See the Amazon VPC User
                    Guide for details. CHANGEABLE.
 
+ networkInterfaceSet -- Return list of VM::EC2::ElasticNetworkInterface objects
+                   attached to this instance.
+
+ iamInstanceProfile -- The IAM instance profile (IIP) associated with this instance.
+
+ ebsOptimized       -- True if instance is optimized for EBS I/O.
+
  groupSet       -- List of VM::EC2::Group objects indicating the VPC
                    security groups in which this instance resides. Not to be
                    confused with groups(), which returns the security groups
@@ -261,6 +268,11 @@ short period of time (up to a few minutes) after disassociation, the
 instance will have no public IP address and will be unreachable from
 the internet.
 
+=head2 @list = $ec2->network_interfaces
+
+Return the network interfaces attached to this instance as a set of
+VM::EC2::NetworkInterface objects (VPC only).
+
 =head2 $instance->refresh
 
 This method will refresh the object from AWS, updating all values to
@@ -303,6 +315,10 @@ Arguments:
 
 In the unnamed argument version you can provide the name and
 optionally the description of the resulting image.
+
+=head2 $boolean = $instance->confirm_product_code($product_code)
+
+Return true if this instance is associated with the given product code.
 
 =head1 VOLUME MANAGEMENT
 
@@ -348,9 +364,34 @@ you can monitor by calling current_status():
     }
     print "volume is ready to go\n";
 
-=head2 $boolean = $instance->confirm_product_code($product_code)
+=head1 NETWORK INTERFACE MANAGEMENT
 
-Return true if this instance is associated with the given product code.
+=head2 $attachment_id = $instance->attach_network_interface($interface_id => $device)
+
+=head2 $attachment_id = $instance->attach_network_interface(-network_interface_id=>$id,
+                                                            -device_index   => $device)
+
+This method attaches a network interface to the current instance using
+the indicated device index. You can use either an elastic network
+interface ID, or a VM::EC2::NetworkInterface object. You may use an
+integer for -device_index, or use the strings "eth0", "eth1" etc.
+
+Required arguments:
+
+ -network_interface_id ID of the network interface to attach.
+ -device_index         Network device number to use (e.g. 0 for eth0).
+
+On success, this method returns the attachmentId of the new attachment
+(not a VM::EC2::NetworkInterface::Attachment object, due to an AWS API
+inconsistency).
+
+=head2 $boolean = $instance->detach_network_interface($interface_id [,$force])
+
+This method detaches a network interface from the current instance. If
+a true second argument is provided, then the detachment will be
+forced, even if the interface is in use.
+
+On success, this method returns a true value.
 
 =head1 ACCESSING INSTANCE METADATA
 
@@ -400,8 +441,10 @@ use VM::EC2::Group;
 use VM::EC2::Instance::State;
 use VM::EC2::Instance::State::Reason;
 use VM::EC2::BlockDevice::Mapping;
+use VM::EC2::NetworkInterface;
 use VM::EC2::Instance::Placement;
 use VM::EC2::ProductCode;
+use VM::EC2::Instance::IamProfile;
 use MIME::Base64 qw(encode_base64 decode_base64);
 use Carp 'croak';
 
@@ -466,6 +509,9 @@ sub valid_fields {
               hypervisor
               tagSet
               platform
+              ebsOptimized
+              networkInterfaceSet
+              iamInstanceProfile
              );
 }
 
@@ -489,6 +535,12 @@ sub sourceDestCheck {
 	return $self->aws->modify_instance_attribute($self,-source_dest_check=>$c);
     }
     return $check eq 'true';
+}
+
+sub ebsOptimized {
+    my $self = shift;
+    my $opt  = $self->SUPER::ebsOptimized;
+    return $opt eq 'true';
 }
 
 sub groupSet {
@@ -596,6 +648,20 @@ sub instanceInitiatedShutdownBehavior {
     return $self->aws->modify_instance_attribute($self, 
 						-shutdown_behavior=>shift()) if @_;
     return $self->aws->describe_instance_attribute($self,'instanceInitiatedShutdownBehavior');
+}
+
+sub networkInterfaceSet {
+    my $self = shift;
+    my $set  = $self->SUPER::networkInterfaceSet or return;
+    return map {VM::EC2::NetworkInterface->new($_,$self->aws)} @{$set->{item}};
+}
+
+sub network_interfaces { shift->networkInterfaceSet }
+
+sub iamInstanceProfile {
+    my $self = shift;
+    my $profile = $self->SUPER::iamInstanceProfile or return;
+    return VM::EC2::Instance::IamProfile->new($profile,$self->aws);
 }
 
 sub current_status {
@@ -731,7 +797,9 @@ sub attach_volume {
     $args{-volume_id} && $args{-device}
        or croak "usage: \$vol->attach(\$instance_id,\$device)";
     $args{-instance_id} = $self->instanceId;
-    return $self->aws->attach_volume(%args);
+    my $result = $self->aws->attach_volume(%args);
+    $self->refresh if $result;
+    return $result;
 }
 
 sub detach_volume {
@@ -753,7 +821,39 @@ sub detach_volume {
 	%args = @_;
     }
     $args{-instance_id} = $self->instanceId;
-    return $self->aws->detach_volume(%args);
+    my $result = $self->aws->detach_volume(%args);
+    $self->refresh if $result;
+    return $result;
+}
+
+sub attach_network_interface {
+    my $self = shift;
+    my %args;
+    if (@_==2 && $_[0] !~ /^-/) {
+	@args{qw(-network_interface_id -device_index)} = @_; 
+    } else {
+	%args = @_;
+    }
+    $args{-network_interface_id} && $args{-device_index}
+       or croak "usage: \$instance->attach_network_interface(\$network_interface_id,\$device_index)";
+
+    $args{-instance_id} = $self->instanceId;
+    my $result = $self->aws->attach_network_interface(%args);
+    $self->refresh if $result;
+    eval {$args{-network_interface_id}->refresh} if $result;
+    return $result;
+}
+
+sub detach_network_interface {
+    my $self = shift;
+    my ($nid,$force) = @_;
+    $nid or croak "usage: \$instance=>detach_network_interface(\$network_interface_id [,\$force])";
+    my ($attachment) = map {$_->attachment} grep { $_->networkInterfaceId eq $nid } $self->network_interfaces;
+    $attachment or croak "$self is not attached to $nid";
+    my $result = $self->aws->detach_network_interface($attachment,$force);
+    $self->refresh if $result;
+    eval {$nid->refresh} if $result;
+    return $result;
 }
 
 sub metadata {

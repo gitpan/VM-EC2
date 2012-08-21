@@ -190,12 +190,53 @@ use constant ObjectRegistration => {
     CreateSpotDatafeedSubscription    => 'fetch_one,spotDatafeedSubscription,VM::EC2::Spot::DatafeedSubscription',
     DescribeSpotDatafeedSubscription  => 'fetch_one,spotDatafeedSubscription,VM::EC2::Spot::DatafeedSubscription',
     DeleteSpotDatafeedSubscription    => 'boolean',
-    DescribeSpotPriceHistory          =>'fetch_items_iterator,spotPriceHistorySet,VM::EC2::Spot::PriceHistory,spot_price_history',
+    DescribeSpotPriceHistory          => 'fetch_items_iterator,spotPriceHistorySet,VM::EC2::Spot::PriceHistory,spot_price_history',
     RequestSpotInstances              => 'fetch_items,spotInstanceRequestSet,VM::EC2::Spot::InstanceRequest',
     CancelSpotInstanceRequests        => 'fetch_items,spotInstanceRequestSet,VM::EC2::Spot::InstanceRequest',
     DescribeSpotInstanceRequests      => 'fetch_items,spotInstanceRequestSet,VM::EC2::Spot::InstanceRequest',
     GetFederationToken                => 'fetch_one,GetFederationTokenResult,VM::EC2::Security::Token',
     GetSessionToken                   => 'fetch_one,GetSessionTokenResult,VM::EC2::Security::Token',
+    # vpcs
+    CreateVpc                         => 'fetch_one,vpc,VM::EC2::VPC',
+    DescribeVpcs                      => 'fetch_items,vpcSet,VM::EC2::VPC',
+    DeleteVpc                         => 'boolean',
+    # dhcp options
+    DescribeDhcpOptions               => 'fetch_items,dhcpOptionsSet,VM::EC2::VPC::DhcpOptions,nokey',
+    CreateDhcpOptions                 => 'fetch_one,dhcpOptions,VM::EC2::VPC::DhcpOptions,nokey',
+    DeleteDhcpOptions                 => 'boolean',
+    AssociateDhcpOptions              => 'boolean',
+    # network interfaces
+    CreateNetworkInterface            => 'fetch_one,networkInterface,VM::EC2::NetworkInterface',
+    DeleteNetworkInterface            => 'boolean',
+    DescribeNetworkInterfaces         => 'fetch_items,networkInterfaceSet,VM::EC2::NetworkInterface',
+    ModifyNetworkInterfaceAttribute   => 'boolean',
+    ResetNetworkInterfaceAttribute    => 'boolean',
+    AttachNetworkInterface            => sub { shift->{attachmentId}    },
+    DetachNetworkInterface            => 'boolean',
+    AssignPrivateIpAddresses          => 'boolean',
+    UnassignPrivateIpAddresses        => 'boolean',
+    # subnets
+    CreateSubnet                      => 'fetch_one,subnet,VM::EC2::VPC::Subnet',
+    DeleteSubnet                      => 'boolean',
+    DescribeSubnets                   => 'fetch_items,subnetSet,VM::EC2::VPC::Subnet',
+    # internet gateways
+    DescribeInternetGateways          => 'fetch_items,internetGatewaySet,VM::EC2::VPC::InternetGateway',
+    # route tables
+    CreateRouteTable                  => 'fetch_one,routeTable,VM::EC2::VPC::RouteTable',
+    DeleteRouteTable                  => 'boolean',
+    DescribeRouteTables               => 'fetch_items,routeTableSet,VM::EC2::VPC::RouteTable',
+    AssociateRouteTable               => sub { shift->{associationId}    },
+    ReplaceRouteTableAssociation      => sub { shift->{newAssociationId} },
+    # route rules
+    CreateRoute                       => 'boolean',
+    DeleteRoute                       => 'boolean',
+    ReplaceRoute                      => 'boolean',
+    # internet gateways
+    CreateInternetGateway             => 'fetch_one,internetGateway,VM::EC2::VPC::InternetGateway',
+    DescribeInternetGateways          => 'fetch_items,internetGatewaySet,VM::EC2::VPC::InternetGateway',
+    DeleteInternetGateway             => 'boolean',
+    AttachInternetGateway             => 'boolean',
+    DetachInternetGateway             => 'boolean',
 };
 
 sub new {
@@ -407,7 +448,7 @@ sub load_module {
 =head1 EXAMPLE OF USING OVERRIDE TO SUBCLASS VM::EC2::Volume
 
 The author decided that a volume object should not be able to delete
-itself, you disagree with that decision. Let's subclass
+itself; you disagree with that decision. Let's subclass
 VM::EC2::Volume to add a delete() method.
 
 First subclass the VM::EC2::Volume class:
@@ -437,9 +478,10 @@ Now we can test it out:
  use MyEC2;
  # find all volumes that are "available" and not in-use
  my @vol = $ec2->describe_volumes({status=>'available'});
- for my $vol (@vol) { $vol->delete && print "$vol deleted\n" }
+ for my $vol (@vol) { 
+    $vol->delete && print "$vol deleted\n" 
+ }
  
-
 =head1 SEE ALSO
 
 L<VM::EC2>

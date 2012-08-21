@@ -187,7 +187,6 @@ Lastly, there are several utility classes:
                                         The reservation Ids are copied into the Instance
                                          object.
 
-
 There is also a high-level API called "VM::EC2::Staging::Manager" for
 managing groups of staging servers and volumes which greatly
 simplifies the task of creating and updating instances that mount
@@ -200,9 +199,9 @@ http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/. The
 following caveats apply:
 
  1) Not all of the Amazon API is currently implemented. Specifically,
-    calls dealing with Virtual Private Clouds (VPC) and cluster
-    management, are not currently supported.  See L</MISSING METHODS>
-    for a list of all the unimplemented API calls.
+    some calls dealing with Virtual Private Clouds (VPC) and cluster
+    management are missing.  See L</MISSING METHODS> for a list of 
+    all the unimplemented API calls.
 
  2) For consistency with common Perl coding practices, method calls
     are lowercase and words in long method names are separated by
@@ -244,6 +243,8 @@ following caveats apply:
     or a shortcut form: 
 
           $ec2->describe_foo('a','b','c');
+
+    Both forms are listed in the headings in the documentation.
 
  5) When the API calls for a list of arguments named Arg.1, Arg.2,
     then the Perl interface allows you to use an anonymous array for
@@ -311,7 +312,7 @@ following caveats apply:
          }
 
  10) Calls to AWS that have failed for one reason or another (invalid
-    parameters, communications problems, service interruptions) will
+    arguments, communications problems, service interruptions) will
     return undef and set the VM::EC2->is_error() method to true. The
     error message and its code can then be recovered by calling
     VM::EC2->error.
@@ -373,7 +374,7 @@ use VM::EC2::Dispatch;
 use VM::EC2::Error;
 use Carp 'croak','carp';
 
-our $VERSION = '1.15';
+our $VERSION = '1.16';
 our $AUTOLOAD;
 our @CARP_NOT = qw(VM::EC2::Image    VM::EC2::Volume
                    VM::EC2::Snapshot VM::EC2::Instance
@@ -399,7 +400,7 @@ sub AUTOLOAD {
 
 =head2 $ec2 = VM::EC2->new(-access_key=>$id,-secret_key=>$key,-endpoint=>$url)
 
-Create a new Amazon access object. Required parameters are:
+Create a new Amazon access object. Required arguments are:
 
  -access_key   Access ID for an authorized user
 
@@ -432,7 +433,7 @@ resources to users who do not have access to your account. If you pass
 either a VM::EC2::Security::Token object, or the
 VM::EC2::Security::Credentials object contained within the token
 object, then new() does not need the -access_key or -secret_key
-parameters. You may also pass a session token string scalar to
+arguments. You may also pass a session token string scalar to
 -security_token, in which case you must also pass the access key ID
 and secret keys generated at the same time the session token was
 created. See
@@ -500,9 +501,19 @@ sub new {
     return $obj;
 }
 
-=head2 $access_key = $ec2->access_key(<$new_access_key>)
+=head2 $access_key = $ec2->access_key([$new_access_key])
 
-Get or set the ACCESS KEY
+Get or set the ACCESS KEY. In this and all similar get/set methods,
+call the method with no arguments to get the current value, and with a
+single argument to change the value:
+
+ $current_key = $ec2->access_key;
+ $ec2->access_key('XYZZY');
+
+In the case of setting the value, these methods will return the old
+value as their result:
+
+ $old_key = $ec2->access_key($new_key);
 
 =cut
 
@@ -515,7 +526,7 @@ sub id       {
     $d;
 }
 
-=head2 $secret = $ec2->secret(<$new_secret>)
+=head2 $secret = $ec2->secret([$new_secret])
 
 Get or set the SECRET KEY
 
@@ -528,7 +539,7 @@ sub secret   {
     $d;
 }
 
-=head2 $secret = $ec2->security_token(<$new_token>)
+=head2 $secret = $ec2->security_token([$new_token])
 
 Get or set the temporary security token. See L</AWS SECURITY TOKENS>.
 
@@ -541,7 +552,7 @@ sub security_token   {
     $d;
 }
 
-=head2 $endpoint = $ec2->endpoint(<$new_endpoint>)
+=head2 $endpoint = $ec2->endpoint([$new_endpoint])
 
 Get or set the ENDPOINT URL.
 
@@ -559,7 +570,7 @@ sub endpoint {
     $d;
  }
 
-=head2 $region = $ec2->region(<$new_region>)
+=head2 $region = $ec2->region([$new_region])
 
 Get or set the EC2 region manipulated by this module. This has the side effect
 of changing the endpoint.
@@ -669,15 +680,38 @@ sub error_str {
     return "$e";
 }
 
+=head2 $account_id = $ec2->account_id
+
+Looks up the account ID corresponding to the credentials provided when
+the VM::EC2 instance was created. The way this is done is to fetch the
+"default" security group, which is guaranteed to exist, and then
+return its groupId field. The result is cached so that subsequent
+accesses are fast.
+
+=head2 $account_id = $ec2->userId
+
+Same as above, for convenience.
+
+=cut
+
+sub account_id {
+    my $self = shift;
+    return $self->{account_id} if exists $self->{account_id};
+    my $sg   = $self->describe_security_groups(-group_name=>'default') or return;
+    return $self->{account_id} ||= $sg->ownerId;
+}
+
+sub userId { shift->account_id }
+
 =head1 EC2 REGIONS AND AVAILABILITY ZONES
 
 This section describes methods that allow you to fetch information on
 EC2 regions and availability zones. These methods return objects of
 type L<VM::EC2::Region> and L<VM::EC2::AvailabilityZone>.
 
-=head2 @regions = $ec2->describe_regions(-region_name=>\@list)
+=head2 @regions = $ec2->describe_regions(@list)
 
-=head2 @regionss = $ec2->describe_regions(@list)
+=head2 @regions = $ec2->describe_regions(-region_name=>\@list)
 
 Describe regions and return a list of VM::EC2::Region objects. Call
 with no arguments to return all regions. You may provide a list of
@@ -694,9 +728,9 @@ sub describe_regions {
     return $self->call('DescribeRegions',@params);
 }
 
-=head2 @zones = $ec2->describe_availability_zones(-zone_name=>\@names,-filter=>\%filters)
-
 =head2 @zones = $ec2->describe_availability_zones(@names)
+
+=head2 @zones = $ec2->describe_availability_zones(-zone_name=>\@names,-filter=>\%filters)
 
 Describe availability zones and return a list of
 VM::EC2::AvailabilityZone objects. Call with no arguments to return
@@ -738,13 +772,13 @@ L<VM::EC2::Instance>. Please see the L<VM::EC2::Instance> manual page
 for additional methods that allow you to attach and detach volumes,
 modify an instance's attributes, and convert instances into images.
 
-=head2 @instances = $ec2->describe_instances(-instance_id=>\@ids,-filter=>\%filters)
-
 =head2 @instances = $ec2->describe_instances(@instance_ids)
 
 =head2 @instances = $ec2->describe_instances(\%filters)
 
-Return a series of VM::EC2::Instance objects. Optional parameters are:
+=head2 @instances = $ec2->describe_instances(-instance_id=>\@ids,-filter=>\%filters)
+
+Return a series of VM::EC2::Instance objects. Optional arguments are:
 
  -instance_id     ID of the instance(s) to return information on. 
                   This can be a string scalar, or an arrayref.
@@ -801,76 +835,114 @@ sub describe_instances {
     return $self->call('DescribeInstances',@params);
 }
 
-=head2 @i = $ec2->run_instances(%param)
+=head2 @i = $ec2->run_instances($ami_id)
+
+=head2 @i = $ec2->run_instances(-image_id=>$id,%other_args)
 
 This method will provision and launch one or more instances given an
 AMI ID. If successful, the method returns a series of
 VM::EC2::Instance objects.
 
+If called with a single argument this will be interpreted as the AMI
+to launch, and all other arguments will take their
+defaults. Otherwise, the arguments will be taken as a
+-parameter=>$argument list.
+
 =over 4
 
-=item Required parameters:
+=item Required arguments:
 
   -image_id       ID of an AMI to launch
  
-=item Optional parameters:
+=item Optional arguments:
 
   -min_count         Minimum number of instances to launch [1]
+
   -max_count         Maximum number of instances to launch [1]
+
   -key_name          Name of the keypair to use
+
   -security_group_id Security group ID to use for this instance.
                      Use an arrayref for multiple group IDs
+
   -security_group    Security group name to use for this instance.
                      Use an arrayref for multiple values.
+
   -user_data         User data to pass to the instances. Do NOT base64
                      encode this. It will be done for you.
+
   -instance_type     Type of the instance to use. See below for a
                      list.
+
   -availability_zone The availability zone you want to launch the
                      instance into. Call $ec2->regions for a list.
+
   -zone              Short version of -availability_aone.
+
   -placement_zone    Deprecated version of -availability_zone.
+
   -placement_group   An existing placement group to launch the
                      instance into. Applicable to cluster instances
                      only.
+
   -placement_tenancy Specify 'dedicated' to launch the instance on a
                      dedicated server. Only applicable for VPC
                      instances.
+
   -kernel_id         ID of the kernel to use for the instances,
                      overriding the kernel specified in the image.
+
   -ramdisk_id        ID of the ramdisk to use for the instances,
                      overriding the ramdisk specified in the image.
+
   -block_devices     Specify block devices to map onto the instances,
                      overriding the values specified in the image.
                      See below for the syntax of this argument.
+
   -block_device_mapping  Alias for -block_devices.
+
   -monitoring        Pass a true value to enable detailed monitoring.
+
   -subnet_id         ID of the subnet to launch the instance
                      into. Only applicable for VPC instances.
+
   -termination_protection  Pass true to lock the instance so that it
                      cannot be terminated using the API. Use
                      modify_instance() to unset this if youu wish to
                      terminate the instance later.
+
   -disable_api_termination -- Same as above.
+
   -shutdown_behavior Pass "stop" (the default) to stop the instance
                      and save its disk state when "shutdown" is called
                      from within the instance. Stopped instances can
                      be restarted later. Pass "terminate" to
                      instead terminate the instance and discard its
                      state completely.
+
   -instance_initiated_shutdown_behavior -- Same as above.
+
   -private_ip_address Assign the instance to a specific IP address
                      from a VPC subnet (VPC only).
+
   -client_token      Unique identifier that you can provide to ensure
                      idempotency of the request. You can use
                      $ec2->token() to generate a suitable identifier.
                      See http://docs.amazonwebservices.com/AWSEC2/
                          latest/UserGuide/Run_Instance_Idempotency.html
+
+  -network_interfaces  A single network interface specification string
+                     or a list of them as an array reference (VPC only).
+                     These are described in more detail below.
+                     
   -iam_arn           The Amazon resource name (ARN) of the IAM Instance Profile (IIP)
                        to associate with the instances.
 
   -iam_name          The name of the IAM instance profile (IIP) to associate with the
                        instances.
+
+  -ebs_optimized     Boolean. If true, create an EBS-optimized instance
+                     (valid only for certain instance types.
 
 =item Instance types
 
@@ -896,9 +968,14 @@ following:
      - 'ephemeral[0-3]': indicates that the Amazon EC2 ephemeral store
        (instance local storage) should be exposed at the specified device.
        For example: '/dev/sdc=ephemeral0'.
+
+     - 'vol-12345678': A volume ID will attempt to attach the given volume to the
+       instance, contingent on volume state and availability zone.
+
+     - 'none': Suppress this block device, even if it is mapped in the AMI.
           
-     - '[<snapshot-id>][:<size>[:<delete-on-termination>]]': indicates
-       that an Amazon EBS volume, created from the specified Amazon EBS
+     - '[<snapshot-id>][:<size>[:<delete-on-termination>[:<volume-type>[:<iops>]]]]': 
+       indicates that an Amazon EBS volume, created from the specified Amazon EBS
        snapshot, should be exposed at the specified device. The following
        combinations are supported:
           
@@ -915,10 +992,17 @@ following:
             volume should be deleted on instance termination. If not
             specified, this will default to 'true' and the volume will be
             deleted.
+
+         - '<volume-type>': The volume type. One of "standard" or "iol".
+
+         - '<iops>': The number of I/O operations per second (IOPS) that
+           the volume suports. A number between 1 to 1000. Only valid
+           for volumes of type "iol".
           
          Examples: -block_devices => '/dev/sdb=snap-7eb96d16'
                    -block_devices => '/dev/sdc=snap-7eb96d16:80:false'
                    -block_devices => '/dev/sdd=:120'
+                   -block_devices => '/dev/sdc=:120:true:iol:500'
 
 To provide multiple mappings, use an array reference. In this example,
 we launch two 'm1.small' instance in which /dev/sdb is mapped to
@@ -929,6 +1013,62 @@ ephemeral storage and /dev/sdc is mapped to a new 100 G EBS volume:
                         -block_devices => ['/dev/sdb=ephemeral0',
                                            '/dev/sdc=:100:true']
     )
+
+=item Network interface syntax
+
+Each instance has a single primary network interface and private IP
+address that is ordinarily automatically assigned by Amazon. When you
+are running VPC instances, however, you can add additional elastic
+network interfaces (ENIs) to the instance and add secondary private IP
+addresses to one or more of these ENIs. ENIs can exist independently
+of instances, and be detached and reattached in much the same way as
+EBS volumes. This is explained in detail at
+http://docs.amazonwebservices.com/AWSEC2/latest/UserGuide/using-instance-addressing.html.
+
+The network configuration can be specified using the
+-network_interface parameter:
+
+ -network_interfaces => ['eth0=10.10.0.12:subnet-1234567:sg-1234567:true:My Custom Eth0',
+                         'eth1=10.10.1.12,10.10.1.13:subnet-999999:sg-1234567:true:My Custom Eth1',
+
+The format is '<device>=<specification>'. The device is an ethernet
+interface name such as eth0, eth1, eth2, etc. The specification has up
+to five fields, each separated by the ":" character. All fields are
+optional and can be left blank. If missing, AWS will choose a default.
+
+  10.10.1.12,10.10.1.13:subnet-999999:sg-1234567:true:My Custom Eth1
+
+B<1. IP address(es)>: A single IP address in standard dot form, or a
+list of IP addresses separated by commas. The first address in the
+list will become the primary private IP address for the
+interface. Subsequent addresses will become secondary private
+addresses. You may specify "auto" or leave the field blank to have AWS
+choose an address automatically from within the subnetwork. To
+allocate several secondary IP addresses and have AWS pick the
+addresses automatically, give the count of secondary addresses you
+wish to allocate as an integer following the primary IP address. For
+example, "auto,3" will allocate an automatic primary IP address and
+three automatic secondary addresses, while "10.10.1.12,3" will force
+the primary address to be 10.10.1.12 and create three automatic
+secondary addresses.
+
+B<2. Subnetwork ID>: The ID of the VPC subnetwork in which the ENI
+resides. An instance may have several ENIs associated with it, and
+each ENI may be attached to a different subnetwork.
+
+B<3. Security group IDs>: A comma-delimited list of the security group
+IDs to associate with this ENI.
+
+B<4. DeleteOnTerminate>: True if this ENI should be automatically
+deleted when the instance terminates.
+
+B<5. Description>: A human-readable description of the ENI.
+
+As an alternative syntax, you may specify the ID of an existing ENI in
+lieu of the primary IP address and other fields. The ENI will be
+attached to the instance if its permissions allow:
+
+ -network_interfaces => 'eth0=eni-123456'
 
 =item Return value
 
@@ -980,7 +1120,7 @@ reservationId(), ownerId(), requesterId() and groups() methods.
 
 sub run_instances {
     my $self = shift;
-    my %args = @_;
+    my %args = $self->args('-image_id',@_);
     $args{-image_id}  or croak "run_instances(): -image_id argument missing";
     $args{-min_count} ||= 1;
     $args{-max_count} ||= $args{-min_count};
@@ -997,15 +1137,17 @@ sub run_instances {
     push @p,('Placement.Tenancy'=>$args{-tenancy})                    if $args{-placement_tenancy};
     push @p,('Monitoring.Enabled'   =>'true')                         if $args{-monitoring};
     push @p,('DisableApiTermination'=>'true')                         if $args{-termination_protection};
+    push @p,('EbsOptimized'=>'true')                                  if $args{-ebs_optimized};
     push @p,('InstanceInitiatedShutdownBehavior'=>$args{-shutdown_behavior}) if $args{-shutdown_behavior};
     push @p,$self->block_device_parm($args{-block_devices}||$args{-block_device_mapping});
+    push @p,$self->network_interface_parm(\%args);
     push @p,$self->iam_parm(\%args);
     return $self->call('RunInstances',@p);
 }
 
-=head2 @s = $ec2->start_instances(-instance_id=>\@instance_ids)
-
 =head2 @s = $ec2->start_instances(@instance_ids)
+
+=head2 @s = $ec2->start_instances(-instance_id=>\@instance_ids)
 
 Start the instances named by @instance_ids and return one or more
 VM::EC2::Instance::State::Change objects.
@@ -1046,12 +1188,12 @@ sub start_instances {
 	or croak "usage: start_instances(\@instance_ids)";
     my $c = 1;
     my @params = map {'InstanceId.'.$c++,$_} @instance_ids;
-    return $self->call('StartInstances',@params) or return;
+    return $self->call('StartInstances',@params);
 }
 
-=head2 @s = $ec2->stop_instances(-instance_id=>\@instance_ids,-force=>1)
-
 =head2 @s = $ec2->stop_instances(@instance_ids)
+
+=head2 @s = $ec2->stop_instances(-instance_id=>\@instance_ids,-force=>1)
 
 Stop the instances named by @instance_ids and return one or more
 VM::EC2::Instance::State::Change objects. In the named parameter
@@ -1096,12 +1238,12 @@ sub stop_instances {
     my $c = 1;
     my @params = map {'InstanceId.'.$c++,$_} @instance_ids;
     push @params,Force=>1 if $force;
-    return $self->call('StopInstances',@params) or return;
+    return $self->call('StopInstances',@params);
 }
 
-=head2 @s = $ec2->terminate_instances(-instance_id=>\@instance_ids)
-
 =head2 @s = $ec2->terminate_instances(@instance_ids)
+
+=head2 @s = $ec2->terminate_instances(-instance_id=>\@instance_ids)
 
 Terminate the instances named by @instance_ids and return one or more
 VM::EC2::Instance::State::Change objects. This method will fail
@@ -1130,12 +1272,12 @@ sub terminate_instances {
 	or croak "usage: start_instances(\@instance_ids)";
     my $c = 1;
     my @params = map {'InstanceId.'.$c++,$_} @instance_ids;
-    return $self->call('TerminateInstances',@params) or return;
+    return $self->call('TerminateInstances',@params);
 }
 
-=head2 @s = $ec2->reboot_instances(-instance_id=>\@instance_ids)
-
 =head2 @s = $ec2->reboot_instances(@instance_ids)
+
+=head2 @s = $ec2->reboot_instances(-instance_id=>\@instance_ids)
 
 Reboot the instances named by @instance_ids and return one or more
 VM::EC2::Instance::State::Change objects.
@@ -1155,7 +1297,7 @@ sub reboot_instances {
 	or croak "Usage: reboot_instances(\@instance_ids)";
     my $c = 1;
     my @params = map {'InstanceId.'.$c++,$_} @instance_ids;
-    return $self->call('RebootInstances',@params) or return;
+    return $self->call('RebootInstances',@params);
 }
 
 =head2 $boolean = $ec2->confirm_product_instance($instance_id,$product_code)
@@ -1174,6 +1316,294 @@ sub confirm_product_instance {
     return $self->call('ConfirmProductInstance',@params);
 }
 
+=head2 $password_data = $ec2->get_password_data($instance_id);
+
+=head2 $password_data = $ec2->get_password_data(-instance_id=>$id);
+
+For Windows instances, get the administrator's password as a
+L<VM::EC2::Instance::PasswordData> object.
+
+=cut
+
+sub get_password_data {
+    my $self = shift;
+    my %args = $self->args(-instance_id=>@_);
+    $args{-instance_id} or croak "Usage: get_password_data(-instance_id=>\$id)";
+    my @params = $self->single_parm('InstanceId',\%args);
+    return $self->call('GetPasswordData',@params);
+}
+
+=head2 $output = $ec2->get_console_output(-instance_id=>'i-12345')
+
+=head2 $output = $ec2->get_console_output('i-12345');
+
+Return the console output of the indicated instance. The output is
+actually a VM::EC2::ConsoleOutput object, but it is
+overloaded so that when treated as a string it will appear as a
+large text string containing the  console output. When treated like an
+object it provides instanceId() and timestamp() methods.
+
+=cut
+
+sub get_console_output {
+    my $self = shift;
+    my %args = $self->args(-instance_id=>@_);
+    $args{-instance_id} or croak "Usage: get_console_output(-instance_id=>\$id)";
+    my @params = $self->single_parm('InstanceId',\%args);
+    return $self->call('GetConsoleOutput',@params);
+}
+
+=head2 @monitoring_state = $ec2->monitor_instances(@list_of_instanceIds)
+
+=head2 @monitoring_state = $ec2->monitor_instances(-instance_id=>\@instanceIds)
+
+This method enables monitoring for the listed instances and returns a
+list of VM::EC2::Instance::MonitoringState objects. You can
+later use these objects to activate and inactivate monitoring.
+
+=cut
+
+sub monitor_instances {
+    my $self = shift;
+    my %args = $self->args('-instance_id',@_);
+    my @params = $self->list_parm('InstanceId',\%args);
+    return $self->call('MonitorInstances',@params);
+}
+
+=head2 @monitoring_state = $ec2->unmonitor_instances(@list_of_instanceIds)
+
+=head2 @monitoring_state = $ec2->unmonitor_instances(-instance_id=>\@instanceIds)
+
+This method disables monitoring for the listed instances and returns a
+list of VM::EC2::Instance::MonitoringState objects. You can
+later use these objects to activate and inactivate monitoring.
+
+=cut
+
+sub unmonitor_instances {
+    my $self = shift;
+    my %args = $self->args('-instance_id',@_);
+    my @params = $self->list_parm('InstanceId',\%args);
+    return $self->call('UnmonitorInstances',@params);
+}
+
+=head2 $meta = VM::EC2->instance_metadata
+
+=head2 $meta = $ec2->instance_metadata
+
+B<For use on running EC2 instances only:> This method returns a
+VM::EC2::Instance::Metadata object that will return information about
+the currently running instance using the HTTP:// metadata fields
+described at
+http://docs.amazonwebservices.com/AWSEC2/latest/UserGuide/index.html?instancedata-data-categories.html. This
+is usually fastest way to get runtime information on the current
+instance.
+
+Note that this method can be called as either an instance or a class
+method.
+
+=cut
+
+sub instance_metadata {
+    VM::EC2::Dispatch::load_module('VM::EC2::Instance::Metadata');
+    return VM::EC2::Instance::Metadata->new();
+}
+
+=head2 @data = $ec2->describe_instance_attribute($instance_id,$attribute)
+
+This method returns instance attributes. Only one attribute can be
+retrieved at a time. The following is the list of attributes that can be
+retrieved:
+
+ instanceType                      -- scalar
+ kernel                            -- scalar
+ ramdisk                           -- scalar
+ userData                          -- scalar
+ disableApiTermination             -- scalar
+ instanceInitiatedShutdownBehavior -- scalar
+ rootDeviceName                    -- scalar
+ blockDeviceMapping                -- list of hashref
+ sourceDestCheck                   -- scalar
+ groupSet                          -- list of scalar
+
+All of these values can be retrieved more conveniently from the
+L<VM::EC2::Instance> object returned from describe_instances(), so
+there is no attempt to parse the results of this call into Perl
+objects. Therefore, some of the attributes, in particular
+'blockDeviceMapping' will be returned as raw hashrefs.
+
+=cut
+
+sub describe_instance_attribute {
+    my $self = shift;
+    @_ == 2 or croak "Usage: describe_instance_attribute(\$instance_id,\$attribute_name)";
+    my ($instance_id,$attribute) = @_;
+    my @param  = (InstanceId=>$instance_id,Attribute=>$attribute);
+    my $result = $self->call('DescribeInstanceAttribute',@param);
+    return $result && $result->attribute($attribute);
+}
+
+=head2 $boolean = $ec2->modify_instance_attribute($instance_id,-$attribute_name=>$value)
+
+This method changes instance attributes. It can only be applied to stopped instances.
+The following is the list of attributes that can be set:
+
+ -instance_type           -- type of instance, e.g. "m1.small"
+ -kernel                  -- kernel id
+ -ramdisk                 -- ramdisk id
+ -user_data               -- user data
+ -termination_protection  -- true to prevent termination from the console
+ -disable_api_termination -- same as the above
+ -shutdown_behavior       -- "stop" or "terminate"
+ -instance_initiated_shutdown_behavior -- same as above
+ -root_device_name        -- root device name
+ -source_dest_check       -- enable NAT (VPC only)
+ -group_id                -- VPC security group
+ -block_devices           -- Specify block devices to change 
+                             deleteOnTermination flag
+ -block_device_mapping    -- Alias for -block_devices
+
+Only one attribute can be changed in a single request. For example:
+
+  $ec2->modify_instance_attribute('i-12345',-kernel=>'aki-f70657b2');
+
+The result code is true if the attribute was successfully modified,
+false otherwise. In the latter case, $ec2->error() will provide the
+error message.
+
+The ability to change the deleteOnTermination flag for attached block devices
+is not documented in the official Amazon API documentation, but appears to work.
+The syntax is:
+
+# turn on deleteOnTermination
+ $ec2->modify_instance_attribute(-block_devices=>'/dev/sdf=v-12345')
+# turn off deleteOnTermination
+ $ec2->modify_instance_attribute(-block_devices=>'/dev/sdf=v-12345')
+
+The syntax is slightly different from what is used by -block_devices
+in run_instances(), and is "device=volumeId:boolean". Multiple block
+devices can be specified using an arrayref.
+
+=cut
+
+sub modify_instance_attribute {
+    my $self = shift;
+    my $instance_id = shift or croak "Usage: modify_instance_attribute(\$instanceId,%param)";
+    my %args   = @_;
+
+    my @param  = (InstanceId=>$instance_id);
+    push @param,$self->value_parm($_,\%args) foreach 
+	qw(InstanceType Kernel Ramdisk UserData DisableApiTermination
+           InstanceInitiatedShutdownBehavior SourceDestCheck);
+    push @param,$self->list_parm('GroupId',\%args);
+    push @param,('DisableApiTermination.Value'=>'true') if $args{-termination_protection};
+    push @param,('InstanceInitiatedShutdownBehavior.Value'=>$args{-shutdown_behavior}) if $args{-shutdown_behavior};
+    my $block_devices = $args{-block_devices} || $args{-block_device_mapping};
+    push @param,$self->block_device_parm($block_devices);
+
+    return $self->call('ModifyInstanceAttribute',@param);
+}
+
+=head2 $boolean = $ec2->reset_instance_attribute($instance_id,$attribute)
+
+This method resets an attribute of the given instance to its default
+value. Valid attributes are "kernel", "ramdisk" and
+"sourceDestCheck". The result code is true if the reset was
+successful.
+
+=cut
+
+sub reset_instance_attribute {
+    my $self = shift;
+    @_      == 2 or croak "Usage: reset_instance_attribute(\$instanceId,\$attribute_name)";
+    my ($instance_id,$attribute) = @_;
+    my %valid = map {$_=>1} qw(kernel ramdisk sourceDestCheck);
+    $valid{$attribute} or croak "attribute to reset must be one of 'kernel', 'ramdisk', or 'sourceDestCheck'";
+    return $self->call('ResetInstanceAttribute',InstanceId=>$instance_id,Attribute=>$attribute);
+}
+
+=head2 @status_list = $ec2->describe_instance_status(@instance_ids);
+
+=head2 @status_list = $ec2->describe_instance_status(-instance_id=>\@ids,-filter=>\%filters,%other_args);
+
+=head2 @status_list = $ec2->describe_instance_status(\%filters);
+
+This method returns a list of VM::EC2::Instance::Status objects
+corresponding to status checks and scheduled maintenance events on the
+instances of interest. You may provide a list of instances to return
+information on, a set of filters, or both.
+
+The filters are described at
+http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeInstanceStatus.html. The
+brief list is:
+
+availability-zone, event.code, event.description, event.not-after,
+event.not-before, instance-state-name, instance-state-code,
+system-status.status, system-status.reachability,
+instance-status.status, instance-status.reachability.
+
+Request arguments are:
+
+  -instance_id            Scalar or array ref containing the instance ID(s) to return
+                           information about (optional).
+
+  -filter                 Filters to apply (optional).
+
+  -include_all_instances  If true, include all instances, including those that are 
+                           stopped, pending and shutting down. Otherwise, returns
+                           the status of running instances only.
+
+ -max_results             An integer corresponding to the number of instance items
+                           per response (must be greater than 5).
+
+If -max_results is specified, then the call will return at most the
+number of instances you requested. You may see whether there are additional
+results by calling more_instance_status(), and then retrieve the next set of
+results with additional call(s) to describe_instance_status():
+
+ my @results = $ec2->describe_instance_status(-max_results => 10);
+ do_something(\@results);
+ while ($ec2->more_instance_status) {
+    @results = $ec2->describe_instance_status;
+    do_something(\@results);
+ }
+
+NOTE: As of 29 July 2012, passing -include_all_instances causes an EC2
+"unknown parameter" error, indicating some mismatch between the
+documented API and the actual one.
+
+=cut
+
+sub more_instance_status {
+    my $self = shift;
+    return $self->{instance_status_token} &&
+           !$self->{instance_status_stop};
+}
+
+sub describe_instance_status {
+    my $self = shift;
+    my @parms;
+
+    if (!@_ && $self->{instance_status_token} && $self->{instance_status_args}) {
+	@parms = (@{$self->{instance_status_args}},NextToken=>$self->{instance_status_token});
+    }
+    
+    else {
+	my %args = $self->args('-instance_id',@_);
+	push @parms,$self->list_parm('InstanceId',\%args);
+	push @parms,$self->filter_parm(\%args);
+	push @parms,$self->boolean_parm('IncludeAllInstances',\%args);
+	push @parms,$self->single_parm('MaxResults',\%args);
+	
+	if ($args{-max_results}) {
+	    $self->{instance_status_token} = 'xyzzy'; # dummy value
+	    $self->{instance_status_args} = \@parms;
+	}
+
+    }
+    return $self->call('DescribeInstanceStatus',@parms);
+}
+
 =head2 $t = $ec2->token
 
 Return a client token for use with start_instances().
@@ -1187,6 +1617,12 @@ sub token {
     $seed =~ s/(.{6})/$1-/g;
     return $seed;
 }
+
+=head1 Waiting for State Changes
+
+The methods in this section allow your script to wait in an efficient
+manner for desired state changes in instances, volumes and other
+objects.
 
 =head2 $ec2->wait_for_instances(@instances)
 
@@ -1345,308 +1781,18 @@ sub wait_for_timeout {
     return $d;
 }
 
-=head2 $password_data = $ec2->get_password_data(-instance_id=>'i-12345');
-
-=head2 $password_data = $ec2->get_password_data('i-12345');
-
-For Windows instances, get the administrator's password as a
-L<VM::EC2::Instance::PasswordData> object.
-
-=cut
-
-sub get_password_data {
-    my $self = shift;
-    my %args = $self->args(-instance_id=>@_);
-    $args{-instance_id} or croak "Usage: get_password_data(-instance_id=>\$id)";
-    my @params = $self->single_parm('InstanceId',\%args);
-    return $self->call('GetPasswordData',@params);
-}
-
-=head2 $output = $ec2->get_console_output(-instance_id=>'i-12345')
-
-=head2 $output = $ec2->get_console_output('i-12345');
-
-Return the console output of the indicated instance. The output is
-actually a VM::EC2::ConsoleOutput object, but it is
-overloaded so that when treated as a string it will appear as a
-large text string containing the  console output. When treated like an
-object it provides instanceId() and timestamp() methods.
-
-=cut
-
-sub get_console_output {
-    my $self = shift;
-    my %args = $self->args(-instance_id=>@_);
-    $args{-instance_id} or croak "Usage: get_console_output(-instance_id=>\$id)";
-    my @params = $self->single_parm('InstanceId',\%args);
-    return $self->call('GetConsoleOutput',@params);
-}
-
-=head2 @monitoring_state = $ec2->monitor_instances(@list_of_instanceIds)
-
-=head2 @monitoring_state = $ec2->monitor_instances(-instance_id=>\@instanceIds)
-
-This method enables monitoring for the listed instances and returns a
-list of VM::EC2::Instance::MonitoringState objects. You can
-later use these objects to activate and inactivate monitoring.
-
-=cut
-
-sub monitor_instances {
-    my $self = shift;
-    my %args = $self->args('-instance_id',@_);
-    my @params = $self->list_parm('InstanceId',\%args);
-    return $self->call('MonitorInstances',@params);
-}
-
-=head2 @monitoring_state = $ec2->unmonitor_instances(@list_of_instanceIds)
-
-=head2 @monitoring_state = $ec2->unmonitor_instances(-instance_id=>\@instanceIds)
-
-This method disables monitoring for the listed instances and returns a
-list of VM::EC2::Instance::MonitoringState objects. You can
-later use these objects to activate and inactivate monitoring.
-
-=cut
-
-sub unmonitor_instances {
-    my $self = shift;
-    my %args = $self->args('-instance_id',@_);
-    my @params = $self->list_parm('InstanceId',\%args);
-    return $self->call('UnmonitorInstances',@params);
-}
-
-=head2 $meta = $ec2->instance_metadata
-
-=head2 $meta = VM::EC2->instance_metadata
-
-B<For use on running EC2 instances only:> This method returns a
-VM::EC2::Instance::Metadata object that will return information about
-the currently running instance using the HTTP:// metadata fields
-described at
-http://docs.amazonwebservices.com/AWSEC2/latest/UserGuide/index.html?instancedata-data-categories.html. This
-is usually fastest way to get runtime information on the current
-instance.
-
-Note that this method can be called as either an instance or a class
-method.
-
-=cut
-
-sub instance_metadata {
-    VM::EC2::Dispatch::load_module('VM::EC2::Instance::Metadata');
-    return VM::EC2::Instance::Metadata->new();
-}
-
-=head2 @data = $ec2->describe_instance_attribute($instance_id,$attribute)
-
-This method returns instance attributes. Only one attribute can be
-retrieved at a time. The following is the list of attributes that can be
-retrieved:
-
- instanceType                      -- scalar
- kernel                            -- scalar
- ramdisk                           -- scalar
- userData                          -- scalar
- disableApiTermination             -- scalar
- instanceInitiatedShutdownBehavior -- scalar
- rootDeviceName                    -- scalar
- blockDeviceMapping                -- list of hashref
- sourceDestCheck                   -- scalar
- groupSet                          -- list of scalar
-
-All of these values can be retrieved more conveniently from the
-L<VM::EC2::Instance> object returned from describe_instances(), so
-there is no attempt to parse the results of this call into Perl
-objects. Therefore, some of the attributes, in particular
-'blockDeviceMapping' will be returned as raw hashrefs.
-
-=cut
-
-sub describe_instance_attribute {
-    my $self = shift;
-    @_ == 2 or croak "Usage: describe_instance_attribute(\$instance_id,\$attribute_name)";
-    my ($instance_id,$attribute) = @_;
-    my @param  = (InstanceId=>$instance_id,Attribute=>$attribute);
-    my $result = $self->call('DescribeInstanceAttribute',@param);
-    return $result && $result->attribute($attribute);
-}
-
-=head2 $boolean = $ec2->modify_instance_attribute($instance_id,-$attribute_name=>$value)
-
-This method changes instance attributes. It can only be applied to stopped instances.
-The following is the list of attributes that can be set:
-
- -instance_type           -- type of instance, e.g. "m1.small"
- -kernel                  -- kernel id
- -ramdisk                 -- ramdisk id
- -user_data               -- user data
- -termination_protection  -- true to prevent termination from the console
- -disable_api_termination -- same as the above
- -shutdown_behavior       -- "stop" or "terminate"
- -instance_initiated_shutdown_behavior -- same as above
- -root_device_name        -- root device name
- -source_dest_check       -- enable NAT (VPC only)
- -group_id                -- VPC security group
- -block_devices           -- Specify block devices to change 
-                             deleteOnTermination flag
- -block_device_mapping    -- Alias for -block_devices
-
-Only one attribute can be changed in a single request. For example:
-
-  $ec2->modify_instance_attribute('i-12345',-kernel=>'aki-f70657b2');
-
-The result code is true if the attribute was successfully modified,
-false otherwise. In the latter case, $ec2->error() will provide the
-error message.
-
-The ability to change the deleteOnTermination flag for attached block devices
-is not documented in the official Amazon API documentation, but appears to work.
-The syntax is:
-
-# turn on deleteOnTermination
- $ec2->modify_instance_attribute(-block_devices=>'/dev/sdf=v-12345')
-# turn off deleteOnTermination
- $ec2->modify_instance_attribute(-block_devices=>'/dev/sdf=v-12345')
-
-The syntax is slightly different from what is used by -block_devices
-in run_instances(), and is "device=volumeId:boolean". Multiple block
-devices can be specified using an arrayref.
-
-=cut
-
-sub modify_instance_attribute {
-    my $self = shift;
-    my $instance_id = shift or croak "Usage: modify_instance_attribute(\$instanceId,%param)";
-    my %args   = @_;
-
-    my @param  = (InstanceId=>$instance_id);
-    push @param,$self->value_parm($_,\%args) foreach 
-	qw(InstanceType Kernel Ramdisk UserData DisableApiTermination
-           InstanceInitiatedShutdownBehavior SourceDestCheck);
-    push @param,$self->list_parm('GroupId',\%args);
-    push @param,('DisableApiTermination.Value'=>'true') if $args{-termination_protection};
-    push @param,('InstanceInitiatedShutdownBehavior.Value'=>$args{-shutdown_behavior}) if $args{-shutdown_behavior};
-    my $block_devices = $args{-block_devices} || $args{-block_device_mapping};
-    push @param,$self->block_device_parm($block_devices);
-
-    return $self->call('ModifyInstanceAttribute',@param);
-}
-
-=head2 $boolean = $ec2->reset_instance_attribute($instance_id,$attribute)
-
-This method resets an attribute of the given instance to its default
-value. Valid attributes are "kernel", "ramdisk" and
-"sourceDestCheck". The result code is true if the reset was
-successful.
-
-=cut
-
-sub reset_instance_attribute {
-    my $self = shift;
-    @_      == 2 or croak "Usage: reset_instance_attribute(\$instanceId,\$attribute_name)";
-    my ($instance_id,$attribute) = @_;
-    my %valid = map {$_=>1} qw(kernel ramdisk sourceDestCheck);
-    $valid{$attribute} or croak "attribute to reset must be one of 'kernel', 'ramdisk', or 'sourceDestCheck'";
-    return $self->call('ResetInstanceAttribute',InstanceId=>$instance_id,Attribute=>$attribute);
-}
-
-=head2 @status_list = $ec2->describe_instance_status(-instance_id=>\@ids,-filter=>\%filters,@other_args);
-
-=head2 @status_list = $ec2->describe_instance_status(@instance_ids);
-
-=head2 @status_list = $ec2->describe_instance_status(\%filters);
-
-This method returns a list of VM::EC2::Instance::Status objects
-corresponding to status checks and scheduled maintenance events on the
-instances of interest. You may provide a list of instances to return
-information on, a set of filters, or both.
-
-The filters are described at
-http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeInstanceStatus.html. The
-brief list is:
-
-availability-zone, event.code, event.description, event.not-after,
-event.not-before, instance-state-name, instance-state-code,
-system-status.status, system-status.reachability,
-instance-status.status, instance-status.reachability.
-
-Request arguments are:
-
-  -instance_id            Scalar or array ref containing the instance ID(s) to return
-                           information about (optional).
-
-  -filter                 Filters to apply (optional).
-
-  -include_all_instances  If true, include all instances, including those that are 
-                           stopped, pending and shutting down. Otherwise, returns
-                           the status of running instances only.
-
- -max_results             An integer corresponding to the number of instance items
-                           per response (must be greater than 5).
-
-If -max_results is specified, then the call will return at most the
-number of instances you requested. You may see whether there are additional
-results by calling more_instance_status(), and then retrieve the next set of
-results with additional call(s) to describe_instance_status():
-
- my @results = $ec2->describe_instance_status(-max_results => 10);
- do_something(\@results);
- while ($ec2->more_instance_status) {
-    @results = $ec2->describe_instance_status;
-    do_something(\@results);
- }
-
-NOTE: As of 29 July 2012, passing -include_all_instances causes an EC2
-"unknown parameter" error, indicating some mismatch between the
-documented API and the actual one.
-
-=cut
-
-sub more_instance_status {
-    my $self = shift;
-    return $self->{instance_status_token} &&
-           !$self->{instance_status_stop};
-}
-
-sub describe_instance_status {
-    my $self = shift;
-    my @parms;
-
-    if (!@_ && $self->{instance_status_token} && $self->{instance_status_args}) {
-	@parms = (@{$self->{instance_status_args}},NextToken=>$self->{instance_status_token});
-    }
-    
-    else {
-	my %args = $self->args('-instance_id',@_);
-	push @parms,$self->list_parm('InstanceId',\%args);
-	push @parms,$self->filter_parm(\%args);
-	push @parms,$self->boolean_parm('IncludeAllInstances',\%args);
-	push @parms,$self->single_parm('MaxResults',\%args);
-	
-	if ($args{-max_results}) {
-	    $self->{instance_status_token} = 'xyzzy'; # dummy value
-	    $self->{instance_status_args} = \@parms;
-	}
-
-    }
-    return $self->call('DescribeInstanceStatus',@parms);
-}
-
-
-
 =head1 EC2 AMAZON MACHINE IMAGES
 
 The methods in this section allow you to query and manipulate Amazon
 machine images (AMIs). See L<VM::EC2::Image>.
 
+=head2 @i = $ec2->describe_images(@image_ids)
+
 =head2 @i = $ec2->describe_images(-image_id=>\@id,-executable_by=>$id,
                                   -owner=>$id, -filter=>\%filters)
 
-=head2 @i = $ec2->describe_images(@image_ids)
-
 Return a series of VM::EC2::Image objects, each describing an
-AMI. Optional parameters:
+AMI. Optional arguments:
 
  -image_id        The id of the image, either a string scalar or an
                   arrayref.
@@ -1673,10 +1819,10 @@ sub describe_images {
     my @params;
     push @params,$self->list_parm($_,\%args) foreach qw(ExecutableBy ImageId Owner);
     push @params,$self->filter_parm(\%args);
-    return $self->call('DescribeImages',@params) or return;
+    return $self->call('DescribeImages',@params);
 }
 
-=head2 $image = $ec2->create_image(%args)
+=head2 $image = $ec2->create_image(-instance_id=>$id,-name=>$name,%other_args)
 
 Create an image from an EBS-backed instance and return a
 VM::EC2::Image object. The instance must be in the "stopped" or
@@ -1711,7 +1857,7 @@ sub create_image {
     return $self->call('CreateImage',@param);
 }
 
-=head2 $image = $ec2->register_image(%args)
+=head2 $image = $ec2->register_image(-name=>$name,%other_args)
 
 Register an image, creating an AMI. This can be used to create an AMI
 from a S3-backed instance-store bundle, or to create an AMI from a
@@ -1782,7 +1928,7 @@ sub deregister_image {
     my $self = shift;
     my %args  = $self->args(-image_id => @_);
     my @param = $self->single_parm(ImageId=>\%args);
-    return $self->call('DeregisterImage',@param) or return;
+    return $self->call('DeregisterImage',@param);
 }
 
 =head2 @data = $ec2->describe_image_attribute($image_id,$attribute)
@@ -1911,7 +2057,7 @@ for additional functionality provided through the object interface.
 
 =head2 @v = $ec2->describe_volumes(@volume_ids)
 
-Return a series of VM::EC2::Volume objects. Optional parameters:
+Return a series of VM::EC2::Volume objects. Optional arguments:
 
  -volume_id    The id of the volume to fetch, either a string
                scalar or an arrayref.
@@ -1932,7 +2078,7 @@ sub describe_volumes {
     my @params;
     push @params,$self->list_parm('VolumeId',\%args);
     push @params,$self->filter_parm(\%args);
-    return $self->call('DescribeVolumes',@params) or return;
+    return $self->call('DescribeVolumes',@params);
 }
 
 =head2 $v = $ec2->create_volume(-availability_zone=>$zone,-snapshot_id=>$snapshotId,-size=>$size)
@@ -1967,7 +2113,7 @@ sub create_volume {
     my @params = (AvailabilityZone => $zone);
     push @params,(SnapshotId   => $snap) if $snap;
     push @params,(Size => $size)         if $size;
-    return $self->call('CreateVolume',@params) or return;
+    return $self->call('CreateVolume',@params);
 }
 
 =head2 $result = $ec2->delete_volume($volume_id);
@@ -1982,7 +2128,7 @@ sub delete_volume {
     my $self = shift;
     my %args  = $self->args(-volume_id => @_);
     my @param = $self->single_parm(VolumeId=>\%args);
-    return $self->call('DeleteVolume',@param) or return;
+    return $self->call('DeleteVolume',@param);
 }
 
 =head2 $attachment = $ec2->attach_volume($volume_id,$instance_id,$device);
@@ -2017,18 +2163,18 @@ or more simply
 
 sub attach_volume {
     my $self = shift;
-    my %args;
-    if ($_[0] !~ /^-/ && @_ == 3) {
-	@args{qw(-volume_id -instance_id -device)} = @_;
-    } else {
-	%args = @_;
+    my %args; 
+    if ($_[0] !~ /^-/ && @_ == 3) { 
+	@args{qw(-volume_id -instance_id -device)} = @_; 
+    } else { 
+	%args = @_; 
     }
-    $args{-volume_id} && $args{-instance_id} && $args{-device}
-      or croak "-volume_id, -instance_id and -device arguments must all be specified";
+    $args{-volume_id} && $args{-instance_id} && $args{-device} or
+	croak "-volume_id, -instance_id and -device arguments must all be specified";
     my @param = $self->single_parm(VolumeId=>\%args);
     push @param,$self->single_parm(InstanceId=>\%args);
     push @param,$self->single_parm(Device=>\%args);
-    return $self->call('AttachVolume',@param) or return;
+    return $self->call('AttachVolume',@param);
 }
 
 =head2 $attachment = $ec2->detach_volume($volume_id)
@@ -2070,16 +2216,16 @@ sub detach_volume {
     push @param,$self->single_parm(InstanceId=>\%args);
     push @param,$self->single_parm(Device=>\%args);
     push @param,$self->single_parm(Force=>\%args);
-    return $self->call('DetachVolume',@param) or return;
+    return $self->call('DetachVolume',@param);
 }
-
-=head2 @v = $ec2->describe_volume_status(-volume_id=>\@ids,-filter=>\%filters)
 
 =head2 @v = $ec2->describe_volume_status(@volume_ids)
 
 =head2 @v = $ec2->describe_volume_status(\%filters)
 
-Return a series of VM::EC2::Volume::StatusItem objects. Optional parameters:
+=head2 @v = $ec2->describe_volume_status(-volume_id=>\@ids,-filter=>\%filters)
+
+Return a series of VM::EC2::Volume::StatusItem objects. Optional arguments:
 
  -volume_id    The id of the volume to fetch, either a string
                scalar or an arrayref.
@@ -2174,9 +2320,9 @@ sub modify_volume_attribute {
     return $self->call('ModifyVolumeAttribute',@param);
 }
 
-=head2 $boolean = $ec2->enable_volume_io(-volume_id=>$volume_id)
-
 =head2 $boolean = $ec2->enable_volume_io($volume_id)
+
+=head2 $boolean = $ec2->enable_volume_io(-volume_id=>$volume_id)
 
 Given the ID of a volume whose I/O has been disabled (e.g. due to
 hardware degradation), this method will reenable the I/O and return
@@ -2192,11 +2338,11 @@ sub enable_volume_io {
     return $self->call('EnableVolumeIO',@param);
 }
 
-=head2 @snaps = $ec2->describe_snapshots(-snapshot_id=>\@ids,%other_param)
-
 =head2 @snaps = $ec2->describe_snapshots(@snapshot_ids)
 
-Returns a series of VM::EC2::Snapshot objects. All parameters
+=head2 @snaps = $ec2->describe_snapshots(-snapshot_id=>\@ids,%other_args)
+
+Returns a series of VM::EC2::Snapshot objects. All arguments
 are optional:
 
  -snapshot_id     ID of the snapshot
@@ -2372,16 +2518,17 @@ groups (firewall rules) and SSH key pairs. See
 L<VM::EC2::SecurityGroup> and L<VM::EC2::KeyPair> for functionality
 that is available through these objects.
 
-=head2 @sg = $ec2->describe_security_groups(-group_id  => \@ids,
-                                            -group_name=> \@names,
-                                            -filter    => \%filters);
-
 =head2 @sg = $ec2->describe_security_groups(@group_ids)
+
+=head2 @sg = $ec2->describe_security_groups(%args);
+
+=head2 @sg = $ec2->describe_security_groups(\%filters);
 
 Searches for security groups (firewall rules) matching the provided
 filters and return a series of VM::EC2::SecurityGroup objects.
 
-Optional parameters:
+In the named-argument form you can provide the following optional
+arguments:
 
  -group_name      A single group name or an arrayref containing a list
                    of names
@@ -2446,8 +2593,8 @@ sub create_security_group {
 
 =head2 $boolean = $ec2->delete_security_group($group_id)
 
-=head2 $boolean = $ec2->delete_security_group(-group_id=>$group_id,
-                                              -group_name=>$name);
+=head2 $boolean = $ec2->delete_security_group(-group_id   => $group_id,
+                                              -group_name => $name);
 
 Delete a security group. Arguments are:
 
@@ -2562,40 +2709,21 @@ sub _security_group_parm {
     return @param;
 }
 
-=head2 $account_id = $ec2->account_id
+=head2 @keys = $ec2->describe_key_pairs(@names);
 
-Looks up the account ID corresponding to the credentials provided when
-the VM::EC2 instance was created. The way this is done is to fetch the
-"default" security group, which is guaranteed to exist, and then
-return its groupId field. The result is cached so that subsequent
-accesses are fast.
-
-=head2 $account_id = $ec2->userId
-
-Same as above, for convenience.
-
-=cut
-
-sub account_id {
-    my $self = shift;
-    return $self->{account_id} if exists $self->{account_id};
-    my $sg   = $self->describe_security_groups(-group_name=>'default') or return;
-    return $self->{account_id} ||= $sg->ownerId;
-}
-
-sub userId { shift->account_id }
+=head2 @keys = $ec2->describe_key_pairs(\%filters);
 
 =head2 @keys = $ec2->describe_key_pairs(-key_name => \@names,
-                                   -filter    => \%filters);
-=head2 @keys = $ec2->describe_key_pairs(@names);
+                                        -filter    => \%filters);
 
 Searches for ssh key pairs matching the provided filters and return
 a series of VM::EC2::KeyPair objects.
 
-Optional parameters:
+Optional arguments:
 
  -key_name      A single key name or an arrayref containing a list
                    of names
+
  -filter          Filter on tags and other attributes.
 
 The full list of key filters can be found at:
@@ -2635,10 +2763,10 @@ sub create_key_pair {
     $self->call('CreateKeyPair',@params);
 }
 
-=head2 $key = $ec2->import_key_pair(-key_name=>$name,
-                                    -public_key_material=>$public_key)
-
 =head2 $key = $ec2->import_key_pair($name,$public_key)
+
+=head2 $key = $ec2->import_key_pair(-key_name            => $name,
+                                    -public_key_material => $public_key)
 
 Imports a preexisting public key into AWS under the specified name.
 If successful, returns a VM::EC2::KeyPair. The public key must be an
@@ -2827,12 +2955,12 @@ The methods in this section allow you to allocate elastic IP
 addresses, attach them to instances, and delete them. See
 L<VM::EC2::ElasticAddress>.
 
-=head2 @addr = $ec2->describe_addresses(-public_ip=>\@addr,-allocation_id=>\@id,-filter->\%filters)
-
 =head2 @addr = $ec2->describe_addresses(@public_ips)
 
+=head2 @addr = $ec2->describe_addresses(-public_ip=>\@addr,-allocation_id=>\@id,-filter->\%filters)
+
 Queries AWS for a list of elastic IP addresses already allocated to
-you. All parameters are optional:
+you. All arguments are optional:
 
  -public_ip     -- An IP address (in dotted format) or an arrayref of
                    addresses to return information about.
@@ -3149,7 +3277,7 @@ returns a list of instances, timestamps and their price at the
 indicated time. Each spot price history point is represented as a
 VM::EC2::Spot::PriceHistory object.
 
-Option parameters are:
+Option arguments are:
 
  -start_time      Start date and time of the desired history
                   data, in the form yyyy-mm-ddThh:mm:ss (GMT).
@@ -3240,7 +3368,7 @@ sub describe_spot_price_history {
     return $self->call('DescribeSpotPriceHistory',@parms);
 }
 
-=head2 @requests = $ec2->request_spot_instances(%param)
+=head2 @requests = $ec2->request_spot_instances(%args)
 
 This method will request one or more spot instances to be launched
 when the current spot instance run-hour price drops below a preset
@@ -3252,7 +3380,7 @@ objects, one for each instance specified in -instance_count.
 
 =over 4
 
-=item Required parameters:
+=item Required arguments:
 
   -spot_price        The desired spot price, in USD.
 
@@ -3260,7 +3388,7 @@ objects, one for each instance specified in -instance_count.
 
   -instance_type     Type of the instance(s) to launch, such as "m1.small"
  
-=item Optional parameters:
+=item Optional arguments:
 
   -instance_count    Maximum number of instances to launch (default 1)
 
@@ -3317,6 +3445,8 @@ objects, one for each instance specified in -instance_count.
 
   -block_device_mapping  Alias for -block_devices.
 
+  -network_interfaces  Same as the -network_interfaces option in run_instances().
+
   -monitoring        Pass a true value to enable detailed monitoring.
 
   -subnet            The ID of the Amazon VPC subnet in which to launch the
@@ -3333,7 +3463,9 @@ objects, one for each instance specified in -instance_count.
   -iam_name          The name of the IAM instance profile (IIP) to associate with the
                        instances.
 
-NOTE: The network interface specification is currently not supported.
+  -ebs_optimized     If true, request an EBS-optimized instance (certain
+                       instance types only).
+
 
 =cut
 
@@ -3353,10 +3485,11 @@ sub request_spot_instances {
     # oddly enough, the following args need to be prefixed with "LaunchSpecification."
     my @launch_spec = map {$self->single_parm($_,\%args)}
             qw(ImageId KeyName UserData AddressingType InstanceType KernelId RamdiskId SubnetId);
-    push @launch_spec, map {$self->list_parm($_,\%args)}
-         qw(SecurityGroup SecurityGroupId);
+    push @launch_spec, map {$self->list_parm($_,\%args)}  qw(SecurityGroup SecurityGroupId);
+    push @launch_spec, ('EbsOptimized'=>'true')           if $args{-ebs_optimized};
     push @launch_spec, $self->block_device_parm($args{-block_devices}||$args{-block_device_mapping});
-    push @launch_spec,$self->iam_parm(\%args);
+    push @launch_spec, $self->iam_parm(\%args);
+    push @launch_spec, $self->network_interface_parm(\%args);
 
     while (my ($key,$value) = splice(@launch_spec,0,2)) {
 	push @p,("LaunchSpecification.$key" => $value);
@@ -3389,16 +3522,16 @@ sub cancel_spot_instance_requests {
 }
 
 
-=head2 @requests = $ec2->describe_spot_instance_requests(-spot_instance_request_id=>\@ids,-filter=>\%filters)
-
 =head2 @requests = $ec2->describe_spot_instance_requests(@spot_instance_request_ids)
 
 =head2 @requests = $ec2->describe_spot_instance_requests(\%filters)
 
+=head2 @requests = $ec2->describe_spot_instance_requests(-spot_instance_request_id=>\@ids,-filter=>\%filters)
+
 This method will return information about current spot instance
 requests as a list of VM::EC2::Spot::InstanceRequest objects.
 
-Optional parameters:
+Optional arguments:
 
  -spot_instance_request_id   -- Scalar or arrayref of request Ids.
 
@@ -3447,6 +3580,1215 @@ sub describe_spot_instance_requests {
     return $self->call('DescribeSpotInstanceRequests',@params);
 }
 
+=head1 VIRTUAL PRIVATE CLOUDS
+
+EC2 virtual private clouds (VPCs) provide facilities for creating
+tiered applications combining public and private subnetworks, and for
+extending your home/corporate network into the cloud.
+
+=cut
+
+=head2 $vpc = $ec2->create_vpc(-cidr_block=>$cidr,-instance_tenancy=>$tenancy)
+
+Create a new VPC. This can be called with a single argument, in which
+case it is interpreted as the desired CIDR block, or 
+
+ $vpc = $ec2->$ec2->create_vpc('10.0.0.0/16') or die $ec2->error_str;
+
+Or it can be called with named arguments.
+
+Required arguments:
+
+ -cidr_block      The Classless Internet Domain Routing address, in the
+                  form xx.xx.xx.xx/xx. One or more subnets will be allocated
+                  from within this block.
+
+Optional arguments:
+
+ -instance_tenancy "default" or "dedicated". The latter requests AWS to
+                  launch all your instances in the VPC on single-tenant
+                  hardware (at additional cost).
+
+See
+http://docs.amazonwebservices.com/AmazonVPC/latest/UserGuide/VPC_Subnets.html
+for a description of the valid CIDRs that can be used with EC2.
+
+On success, this method will return a new VM::EC2::VPC object. You can
+then use this object to create new subnets within the VPC:
+
+ $vpc     = $ec2->create_vpc('10.0.0.0/16')    or die $ec2->error_str;
+ $subnet1 = $vpc->create_subnet('10.0.0.0/24') or die $vpc->error_str;
+ $subnet2 = $vpc->create_subnet('10.0.1.0/24') or die $vpc->error_str;
+ $subnet3 = $vpc->create_subnet('10.0.2.0/24') or die $vpc->error_str;
+
+=cut
+
+sub create_vpc {
+    my $self = shift;
+    my %args   = $self->args('-cidr_block',@_);
+    $args{-cidr_block} or croak "create_vpc(): must provide a -cidr_block parameter";
+    my @parm   = $self->list_parm('CidrBlock',\%args);
+    push @parm,  $self->single_parm('instanceTenancy',\%args);
+    return $self->call('CreateVpc',@parm);
+}
+
+=head2 @vpc = $ec2->describe_vpcs(@vpc_ids)
+
+=head2 @vpc = $ec2->describe_vpcs(\%filter)
+
+=head2 @vpc = $ec2->describe_vpcs(-vpc_id=>\@list,-filter=>\%filter)
+
+Describe VPCs that you own and return a list of VM::EC2::VPC
+objects. Call with no arguments to return all VPCs, or provide a list
+of VPC IDs to return information on those only. You may also provide a
+filter list, or named argument forms.
+
+Optional arguments:
+
+ -vpc_id      A scalar or array ref containing the VPC IDs you want
+              information on.
+
+ -filter      A hashref of filters to apply to the query.
+
+The filters you can use are described at
+http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeVpcs.html
+
+=cut
+
+sub describe_vpcs {
+    my $self = shift;
+    my %args   = $self->args('-vpc_id',@_);
+    my @parm   = $self->list_parm('VpcId',\%args);
+    push @parm,  $self->filter_parm(\%args);
+    return $self->call('DescribeVpcs',@parm);
+}
+
+=head2 $success = $ec2->delete_vpc($vpc_id)
+
+=head2 $success = $ec2->delete_vpc(-vpc_id=>$vpc_id)
+
+Delete the indicated VPC, returning true if successful.
+
+=cut
+
+sub delete_vpc {
+    my $self = shift;
+    my %args  = $self->args(-vpc_id => @_);
+    my @param = $self->single_parm(VpcId=>\%args);
+    return $self->call('DeleteVpc',@param);
+}
+
+=head1 VPC Subnets and Routing
+
+These methods manage subnet objects and the routing among them. A VPC
+may have a single subnet or many, and routing rules determine whether
+the subnet has access to the internet ("public"), is entirely private,
+or is connected to a customer gateway device to form a Virtual Private
+Network (VPN) in which your home network's address space is extended
+into the Amazon VPC. 
+
+All instances in a VPC are located in one subnet or another. Subnets
+may be public or private, and are organized in a star topology with a
+logical router in the middle.
+
+Although all these methods can be called from VM::EC2 objects, many
+are more conveniently called from the VM::EC2::VPC object family. This
+allows for steps that typically follow each other, such as creating a
+route table and associating it with a subnet, happen
+automatically. For example, this series of calls creates a VPC with a
+single subnet, creates an Internet gateway attached to the VPC,
+associates a new route table with the subnet and then creates a
+default route from the subnet to the Internet gateway.
+
+ $vpc       = $ec2->create_vpc('10.0.0.0/16')     or die $ec2->error_str;
+ $subnet1   = $vpc->create_subnet('10.0.0.0/24')  or die $vpc->error_str;
+ $gateway   = $vpc->create_internet_gateway       or die $vpc->error_str;
+ $routeTbl  = $subnet->create_route_table         or die $vpc->error_str;
+ $routeTbl->create_route('0.0.0.0/0' => $gateway) or die $vpc->error_str;
+
+=head2 $subnet = $ec2->create_subnet(-vpc_id=>$id,-cidr_block=>$block)
+
+This method creates a new subnet within the given VPC. Pass a VPC
+object or VPC ID, and a CIDR block string. If successful, the method
+will return a VM::EC2::VPC::Subnet object.
+
+Required arguments:
+
+ -vpc_id     A VPC ID or previously-created VM::EC2::VPC object.
+
+ -cidr_block A CIDR block string in the form "xx.xx.xx.xx/xx". The
+             CIDR address must be within the CIDR block previously
+             assigned to the VPC, and must not overlap other subnets
+             in the VPC.
+
+Optional arguments:
+
+ -availability_zone  The availability zone for the instances launched
+                     within this instance, either an availability zone
+                     name, or a VM::EC2::AvailabilityZone object. If
+                     this is not specified, then AWS chooses a zone for
+                     you automatically.
+
+=cut
+
+sub create_subnet {
+    my $self = shift;
+    my %args = @_;
+    $args{-vpc_id} && $args{-cidr_block} 
+      or croak "Usage: create_subnet(-vpc_id=>\$id,-cidr_block=>\$block)";
+    my @parm = map {$self->single_parm($_ => \%args)} qw(VpcId CidrBlock AvailabilityZone);
+    return $self->call('CreateSubnet',@parm);
+}
+
+=head2 $success = $ec2->delete_subnet($subnet_id)
+
+=head2 $success = $ec2->delete_subnet(-subnet_id=>$id)
+
+This method deletes the indicated subnet. It may be called with a
+single argument consisting of the subnet ID, or a named argument form
+with the argument -subnet_id.
+
+=cut
+
+sub delete_subnet {
+    my $self = shift;
+    my %args  = $self->args(-subnet_id=>@_);
+    my @parm = $self->single_parm(SubnetId=>\%args);
+    return $self->call('DeleteSubnet',@parm);
+}
+
+=head2 @subnets = $ec2->describe_subnets(@subnet_ids)
+
+=head2 @subnets = $ec2->describe_subnets(\%filters)
+
+=head2 @subnets = $ec2->describe_subnets(-subnet_id=>$id,
+                                         -filter   => \%filters)
+
+This method returns a list of VM::EC2::VPC::Subnet objects. Called
+with no arguments, it returns all Subnets (not filtered by VPC
+Id). Pass a list of subnet IDs or a filter hashref in order to
+restrict the search.
+
+Optional arguments:
+
+ -subnet_id     Scalar or arrayref of subnet IDs.
+ -filter        Hashref of filters.
+
+Available filters are described at
+http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeSubnets.html
+
+=cut
+
+sub describe_subnets {
+    my $self = shift;
+    my %args  = $self->args(-subnet_id => @_);
+    my @parm   = $self->list_parm('SubnetId',\%args);
+    push @parm,  $self->filter_parm(\%args);
+    return $self->call('DescribeSubnets',@parm);
+}
+
+=head2 $table = $ec2->create_route_table($vpc_id)
+
+=head2 $table = $ec2->create_route_table(-vpc_id=>$id)
+
+This method creates a new route table within the given VPC and returns
+a VM::EC2::VPC::RouteTable object. By default, every route table
+includes a local route that enables traffic to flow within the
+VPC. You may add additional routes using create_route().
+
+This method can be called using a single argument corresponding to VPC
+ID for the new route table, or with the named argument form.
+
+Required arguments:
+
+ -vpc_id     A VPC ID or previously-created VM::EC2::VPC object.
+
+=cut
+
+sub create_route_table {
+    my $self = shift;
+    my %args = $self->args(-vpc_id => @_);
+    $args{-vpc_id} 
+      or croak "Usage: create_subnet(-vpc_id=>\$id)";
+    my @parm = $self->single_parm(VpcId => \%args);
+    return $self->call('CreateRouteTable',@parm);
+}
+
+=head2 $success = $ec2->delete_route_table($route_table_id)
+
+=head2 $success = $ec2->delete_route_table(-route_table_id=>$id)
+
+This method deletes the indicated route table and all the route
+entries within it. It may not be called on the main route table, or if
+the route table is currently associated with a subnet.
+
+The method can be called with a single argument corresponding to the
+route table's ID, or using the named form with argument -route_table_id.
+
+=cut
+
+sub delete_route_table {
+    my $self = shift;
+    my %args  = $self->args(-route_table_id=>@_);
+    my @parm = $self->single_parm(RouteTableId=>\%args);
+    return $self->call('DeleteRouteTable',@parm);
+}
+
+=head2 @tables = $ec2->describe_route_tables(@route_table_ids)
+
+=head2 @tables = $ec2->describe_route_tables(\%filters)
+
+=head2 @tables = $ec2->describe_route_tables(-route_table_id=> \@ids,
+                                             -filter        => \%filters);
+
+This method describes all or some of the route tables available to
+you. You may use the filter to restrict the search to a particular
+type of route table using one of the filters described at
+http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeRouteTables.html.
+
+Some of the commonly used filters are:
+
+ vpc-id                  ID of the VPC the route table is in.
+ association.subnet-id   ID of the subnet the route table is
+                          associated with.
+ route.state             State of the route, either 'active' or 'blackhole'
+ tag:<key>               Value of a tag
+
+=cut
+
+sub describe_route_tables {
+    my $self = shift;
+    my %args  = $self->args(-route_table_id => @_);
+    my @parm   = $self->list_parm('RouteTableId',\%args);
+    push @parm,  $self->filter_parm(\%args);
+    return $self->call('DescribeRouteTables',@parm);
+}
+
+=head2 $associationId = $ec2->associate_route_table($subnet_id => $route_table_id)
+
+=head2 $associationId = $ec2->associate_route_table(-subnet_id      => $id,
+                                                    -route_table_id => $id)
+
+This method associates a route table with a subnet. Both objects must
+be in the same VPC. You may use either string IDs, or
+VM::EC2::VPC::RouteTable and VM::EC2::VPC::Subnet objects.
+
+On success, an associationID is returned, which you may use to
+disassociate the route table from the subnet later. The association ID
+can also be found by searching through the VM::EC2::VPC::RouteTable
+object.
+
+Required arguments:
+
+ -subnet_id      The subnet ID or a VM::EC2::VPC::Subnet object.
+
+ -route_table_id The route table ID or a M::EC2::VPC::RouteTable object.
+
+It may be more convenient to call the
+VM::EC2::VPC::Subnet->associate_route_table() or
+VM::EC2::VPC::RouteTable->associate_subnet() methods, which are front
+ends to this method.
+
+=cut
+
+sub associate_route_table {
+    my $self = shift;
+    my %args;
+    if ($_[0] !~ /^-/ && @_ == 2) {
+	@args{qw(-subnet_id -route_table_id)} = @_;
+    } else {
+	%args = @_;
+    }
+    $args{-subnet_id} && $args{-route_table_id}
+       or croak "-subnet_id, and -route_table_id arguments required";
+    my @param = $self->single_parm(SubnetId=>\%args),
+                $self->single_parm(RouteTableId=>\%args);
+    return $self->call('AssociateRouteTable',@param);
+}
+
+=head2 $success = $ec2->dissociate_route_table($association_id)
+
+=head2 $success = $ec2->dissociate_route_table(-association_id => $id)
+
+This method disassociates a route table from a subnet. You must
+provide the association ID (either returned from
+associate_route_table() or found among the associations() of a
+RouteTable object). You may use the short single-argument form, or the
+longer named argument form with the required argument -association_id.
+
+The method returns true on success.
+
+=cut
+
+sub disassociate_route_table {
+    my $self = shift;
+    my %args   = $self->args('-association_id',@_);
+    my @params = $self->single_parm('AssociationId',\%args);
+    return $self->call('DisassociateRouteTable',@params);
+}
+
+=head2 $new_association = $ec2->replace_route_table_association($association_id=>$route_table_id)
+
+
+=head2 $new_association = $ec2->replace_route_table_association(-association_id => $id,
+                                                                -route_table_id => $id)
+
+This method changes the route table associated with a given
+subnet. You must pass the replacement route table ID and the
+association ID. To replace the main route table, use its association
+ID and the ID of the route table you wish to replace it with.
+
+On success, a new associationID is returned.
+
+Required arguments:
+
+ -association_id  The association ID
+
+ -route_table_id   The route table ID or a M::EC2::VPC::RouteTable object.
+
+=cut
+
+sub replace_route_table_association {
+    my $self = shift;
+    my %args;
+    if ($_[0] !~ /^-/ && @_ == 2) {
+	@args{qw(-association_id -route_table_id)} = @_;
+    } else {
+	%args = @_;
+    }
+    $args{-association_id} && $args{-route_table_id}
+       or croak "-association_id, and -route_table_id arguments required";
+    my @param = $self->single_parm(AssociationId => \%args),
+                $self->single_parm(RouteTableId  => \%args);
+    return $self->call('ReplaceRouteTableAssociation',@param);
+}
+
+=head2 $success = $ec2->create_route($route_table_id,$destination,$target)
+
+=head2 $success = $ec2->create_route(-route_table_id => $id,
+                                     -destination_cidr_block => $block,
+                                     -target=>$target)
+
+This method creates a routing rule in a route table within a VPC. It
+takes three mandatory arguments consisting of the route table, the
+CIDR address block to match packet destinations against, and a target
+to route matching packets to. The target may be an internet gateway, a
+NAT instance, or a network interface ID.
+
+Network packets are routed by matching their destination addresses
+against a CIDR block. For example, 0.0.0.0/0 matches all addresses,
+while 10.0.1.0/24 matches 10.0.1.* addresses. When a packet matches
+more than one rule, the most specific matching routing rule is chosen.
+
+In the named argument form, the following arguments are recognized:
+
+ -route_table_id    The ID of a route table, or a VM::EC2::VPC::RouteTable
+                    object.
+
+ -destination_cidr_block
+                    The CIDR address block to match against packet destinations.
+
+ -destination       A shorthand version of -destination_cidr_block.
+
+ -target            The destination of matching packets. See below for valid
+                    targets.
+
+The -target value can be any one of the following:
+
+ 1. A VM::EC2::VPC::InternetGateway object, or an internet gateway ID matching
+    the regex /^igw-[0-9a-f]{8}$/
+
+ 2. A VM::EC2::Instance object, or an instance ID matching the regex
+ /^i-[0-9a-f]{8}$/.
+
+ 3. A VM::EC2::NetworkInterface object, or a network interface ID
+    matching the regex /^eni-[0-9a-f]{8}$/.
+
+On success, this method returns true.
+
+=cut
+
+sub create_route {
+    my $self = shift;
+    return $self->_manipulate_route('CreateRoute',@_);
+}
+
+=head2 $success = $ec2->delete_route($route_table_id,$destination_block)
+
+This method deletes a route in the specified routing table. The
+destination CIDR block is used to indicate which route to delete. On
+success, the method returns true.
+
+=cut
+
+sub delete_route {
+    my $self = shift;
+    @_ == 2 or croak "Usage: delete_route(\$route_table_id,\$destination_block)";
+    my %args;
+    @args{qw(-route_table_id -destination_cidr_block)} = @_;
+    my @parm = map {$self->single_parm($_,\%args)} qw(RouteTableId DestinationCidrBlock);
+    return $self->call('DeleteRoute',@parm);
+}
+
+=head2 $success = $ec2->replace_route($route_table_id,$destination,$target)
+
+=head2 $success = $ec2->replace_route(-route_table_id => $id,
+                                     -destination_cidr_block => $block,
+                                     -target=>$target)
+
+This method replaces an existing routing rule in a route table within
+a VPC. It takes three mandatory arguments consisting of the route
+table, the CIDR address block to match packet destinations against,
+and a target to route matching packets to. The target may be an
+internet gateway, a NAT instance, or a network interface ID.
+
+Network packets are routed by matching their destination addresses
+against a CIDR block. For example, 0.0.0.0/0 matches all addresses,
+while 10.0.1.0/24 matches 10.0.1.* addresses. When a packet matches
+more than one rule, the most specific matching routing rule is chosen.
+
+In the named argument form, the following arguments are recognized:
+
+ -route_table_id    The ID of a route table, or a VM::EC2::VPC::RouteTable
+                    object.
+
+ -destination_cidr_block
+                    The CIDR address block to match against packet destinations.
+
+ -destination       A shorthand version of -destination_cidr_block.
+
+ -target            The destination of matching packets. See below for valid
+                    targets.
+
+The -target value can be any one of the following:
+
+ 1. A VM::EC2::VPC::InternetGateway object, or an internet gateway ID matching
+    the regex /^igw-[0-9a-f]{8}$/
+
+ 2. A VM::EC2::Instance object, or an instance ID matching the regex
+ /^i-[0-9a-f]{8}$/.
+
+ 3. A VM::EC2::NetworkInterface object, or a network interface ID
+    matching the regex /^eni-[0-9a-f]{8}$/.
+
+On success, this method returns true.
+
+=cut
+
+sub replace_route {
+    my $self = shift;
+    return $self->_manipulate_route('ReplaceRoute',@_);
+}
+
+sub _manipulate_route {
+    my $self = shift;
+    my $api_call = shift;
+
+    my %args;
+    if ($_[0] !~ /^-/ && @_ == 3) {
+	@args{qw(-route_table_id -destination -target)} = @_;
+    } else {
+	%args = @_;
+    }
+
+    $args{-destination_cidr_block} ||= $args{-destination};
+    $args{-destination_cidr_block} && $args{-route_table_id} && $args{-target}
+       or croak "-route_table_id, -destination_cidr_block, and -target arguments required";
+
+    # figure out what the target is.
+    $args{-gateway_id}  = $args{-target} if eval{$args{-target}->isa('VM::EC2::VPC::InternetGateway')}
+                                             || $args{-target} =~ /^igw-[0-9a-f]{8}$/;
+    $args{-instance_id} = $args{-target} if eval{$args{-target}->isa('VM::EC2::Instance')}
+                                             || $args{-target} =~ /^i-[0-9a-f]{8}$/;
+    $args{-network_interface_id} = $args{-target} if eval{$args{-target}->isa('VM::EC2::NetworkInterface')}
+                                             || $args{-target} =~ /^eni-[0-9a-f]{8}$/;
+
+    my @parm = map {$self->single_parm($_,\%args)} 
+               qw(RouteTableId DestinationCidrBlock GatewayId InstanceId NetworkInterfaceId);
+
+    return $self->call($api_call,@parm);
+}
+
+=head2 $gateway = $ec2->create_internet_gateway()
+
+This method creates a new Internet gateway. It takes no arguments and
+returns a VM::EC2::VPC::InternetGateway object. Gateways are initially
+independent of any VPC, but later can be attached to one or more VPCs
+using attach_internet_gateway().
+
+=cut
+
+sub create_internet_gateway {
+    my $self = shift;
+    return $self->call('CreateInternetGateway');
+}
+
+=head2 $success = $ec2->delete_internet_gateway($internet_gateway_id)
+
+=head2 $success = $ec2->delete_internet_gateway(-internet_gateway_id=>$id)
+
+This method deletes the indicated internet gateway. It may be called
+with a single argument corresponding to the route table's ID, or using
+the named form with argument -internet_gateway_id.
+
+=cut
+
+sub delete_internet_gateway {
+    my $self = shift;
+    my %args  = $self->args(-internet_gateway_id=>@_);
+    my @parm = $self->single_parm(InternetGatewayId=>\%args);
+    return $self->call('DeleteInternetGateway',@parm);
+}
+
+
+=head2 @gateways = $ec2->describe_internet_gateways(@gateway_ids)
+
+=head2 @gateways = $ec2->describe_internet_gateways(\%filters)
+
+=head2 @gateways = $ec2->describe_internet_gateways(-internet_gateway_id=>\@ids,
+                                                    -filter             =>\$filters)
+
+This method describes all or some of the internet gateways available
+to you. You may use the filter to restrict the search to a particular
+type of internet gateway using one or more of the filters described at
+http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeInternetGateways.html.
+
+Some of the commonly used filters are:
+
+ attachment.vpc-id       ID of one of the VPCs the gateway is attached to
+ attachment.state        State of the gateway, always "available"
+ tag:<key>               Value of a tag
+
+On success this method returns a list of VM::EC2::VPC::InternetGateway
+objects.
+
+=cut
+
+sub describe_internet_gateways {
+    my $self = shift;
+    my %args  = $self->args(-internet_gateway_id => @_);
+    my @parm   = $self->list_parm('InternetGatewayId',\%args);
+    push @parm,  $self->filter_parm(\%args);
+    return $self->call('DescribeInternetGateways',@parm);
+}
+
+=head2 $boolean = $ec2->attach_internet_gateway($internet_gateway_id,$vpc_id)
+
+=head2 $boolean = $ec2->attach_internet_gateway(-internet_gateway_id => $id,
+                                                -vpc_id              => $id)
+
+This method attaches an internet gateway to a VPC.  You can use
+internet gateway and VPC IDs, or their corresponding
+VM::EC2::VPC::InternetGateway and VM::EC2::VPC objects.
+
+Required arguments:
+
+ -internet_gateway_id ID of the network interface to attach.
+ -vpc_id              ID of the instance to attach the interface to.
+
+On success, this method a true value.
+
+Note that it may be more convenient to attach and detach gateways via
+methods in the VM::EC2::VPC and VM::EC2::VPC::Gateway objects.
+
+ $vpc->attach_internet_gateway($gateway);
+ $gateway->attach($vpc);
+
+=cut
+
+sub attach_internet_gateway {
+    my $self = shift;
+    my %args; 
+    if ($_[0] !~ /^-/ && @_ == 2) { 
+	@args{qw(-internet_gateway_id -vpc_id)} = @_; 
+    } else { 
+	%args = @_;
+    }
+    $args{-internet_gateway_id} && $args{-vpc_id}
+       or croak "-internet_gateway_id and-vpc_id arguments must be specified";
+
+    $args{-device_index} =~ s/^eth//;
+    
+    my @param = $self->single_parm(InternetGatewayId=>\%args);
+    push @param,$self->single_parm(VpcId=>\%args);
+    return $self->call('AttachInternetGateway',@param);
+}
+
+=head2 $boolean = $ec2->detach_internet_gateway($internet_gateway_id,$vpc_id)
+
+=head2 $boolean = $ec2->detach_internet_gateway(-internet_gateway_id => $id,
+                                                -vpc_id              => $id)
+
+This method detaches an internet gateway to a VPC.  You can use
+internet gateway and VPC IDs, or their corresponding
+VM::EC2::VPC::InternetGateway and VM::EC2::VPC objects.
+
+Required arguments:
+
+ -internet_gateway_id ID of the network interface to detach.
+ -vpc_id              ID of the VPC to detach the gateway from.
+
+On success, this method a true value.
+
+Note that it may be more convenient to detach and detach gateways via
+methods in the VM::EC2::VPC and VM::EC2::VPC::Gateway objects.
+
+ $vpc->detach_internet_gateway($gateway);
+ $gateway->detach($vpc);
+
+=cut
+
+sub detach_internet_gateway {
+    my $self = shift;
+    my %args; 
+    if ($_[0] !~ /^-/ && @_ == 2) { 
+	@args{qw(-internet_gateway_id -vpc_id)} = @_; 
+    } else { 
+	%args = @_;
+    }
+    $args{-internet_gateway_id} && $args{-vpc_id}
+       or croak "-internet_gateway_id and-vpc_id arguments must be specified";
+
+    $args{-device_index} =~ s/^eth//;
+    
+    my @param = $self->single_parm(InternetGatewayId=>\%args);
+    push @param,$self->single_parm(VpcId=>\%args);
+    return $self->call('DetachInternetGateway',@param);
+}
+
+=head1 DHCP Options
+
+These methods manage DHCP Option objects, which can then be applied to
+a VPC to configure the DHCP options applied to running instances.
+
+=head2 $options = $ec2->create_dhcp_options(\%configuration_list)
+
+This method creates a DhcpOption object, The single required argument is a
+configuration list hash (which can be passed either as a hashref or a
+flattened hash) with one or more of the following keys:
+
+ -domain_name            Domain name for instances running in this VPC.
+
+ -domain_name_servers    Scalar or arrayref containing up to 4 IP addresses of
+                         domain name servers for this VPC.
+
+ -ntp_servers            Scalar or arrayref containing up to 4 IP addresses
+                         of network time protocol servers
+
+ -netbios_name_servers   Scalar or arrayref containing up to 4 IP addresses for
+                         NetBIOS name servers.
+
+ -netbios_node_type      The NetBios node type (1,2,4 or 8). Amazon recommends
+                         using "2" at this time.
+
+On successful completion, a VM::EC2::VPC::DhcpOptions object will be
+returned. This can be associated with a VPC using the VPC object's
+set_dhcp_options() method:
+
+ $vpc     = $ec2->create_vpc(...);
+ $options = $ec2->create_dhcp_options(-domain_name=>'test.com',
+                                      -domain_name_servers=>['204.16.255.55','216.239.34.10']);
+ $vpc->set_dhcp_options($options);
+
+=cut
+
+# { 'domain-name-servers' => ['192.168.2.1','192.168.2.2'],'domain-name'=>'example.com'}
+sub create_dhcp_options {
+    my $self = shift;
+    my %args;
+    if (@_ == 1 && ref $_[0] eq 'HASH') {
+	%args = %{$_[0]};
+    } else {
+	%args = @_;
+    }
+    my @parm;
+    my $count = 1;
+    for my $key (sort keys %args) {
+	my $value  = $args{$key};
+	my @values = ref $value && ref $value eq 'ARRAY' ? @$value : $value;
+	$key =~ s/^-//;
+	$key =~ s/_/-/g;
+	my $item = 1;
+	push @parm,("DhcpConfiguration.$count.Key"  => $key);
+	push @parm,("DhcpConfiguration.$count.Value.".$item++ => $_) foreach @values;
+	$count++;
+    }
+    return $self->call('CreateDhcpOptions',@parm);
+}
+
+=head2 $success = $ec2->delete_dhcp_options($dhcp_id)
+
+Delete the indicated DHCPOptions, returning true if successful. You
+may also use the named argument -dhcp_options_id..
+
+=cut
+
+sub delete_dhcp_options {
+    my $self = shift;
+    my %args  = $self->args(-dhcp_options_id => @_);
+    my @param = $self->single_parm(DhcpOptionsId=>\%args);
+    return $self->call('DeleteDhcpOptions',@param);
+}
+
+=head2 @options = $ec2->describe_dhcp_options(@option_ids)
+
+=head2 @options = $ec2->describe_dhcp_options(\%filters)
+
+=head2 @options = $ec2->describe_dhcp_options(-dhcp_options_id=>$id,
+                                              -filter         => \%filters)
+
+This method returns a list of VM::EC2::VPC::DhcpOptions objects, which
+describe a set of DHCP options that can be assigned to a VPC. Called
+with no arguments, it returns all DhcpOptions. Pass a list of option
+IDs or a filter hashref in order to restrict the search.
+
+Optional arguments:
+
+ -dhcp_options_id     Scalar or arrayref of DhcpOption IDs.
+ -filter              Hashref of filters.
+
+Available filters are described at
+http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeDhcpOptions.html.
+
+=cut
+
+sub describe_dhcp_options {
+    my $self = shift;
+    my %args  = $self->args(-dhcp_options_id => @_);
+    my @parm   = $self->list_parm('DhcpOptionsId',\%args);
+    push @parm,  $self->filter_parm(\%args);
+    return $self->call('DescribeDhcpOptions',@parm);
+}
+
+=head2 $success = $ec2->associate_dhcp_options($vpc_id => $dhcp_id)
+
+=head2 $success = $ec2->associate_dhcp_options(-vpc_id => $vpc_id,-dhcp_options_id => $dhcp_id)
+
+Associate a VPC ID with a DHCP option set. Pass an ID of 'default' to
+restore the default DHCP options for the VPC.
+
+=cut
+
+sub associate_dhcp_options {
+    my $self = shift;
+    my %args;
+    if ($_[0] !~ /^-/ && @_ == 2) {
+	@args{qw(-vpc_id -dhcp_options_id)} = @_;
+    } else {
+	%args = @_;
+    }
+    $args{-vpc_id} && $args{-dhcp_options_id}
+      or croak "-vpc_id and -dhcp_options_id must be specified";
+    my @param    = $self->single_parm(DhcpOptionsId=> \%args);
+    push @param,   $self->single_parm(VpcId        => \%args);
+    return $self->call('AssociateDhcpOptions',@param);
+}
+
+=head1 Elastic Network Interfaces
+
+These methods create and manage Elastic Network Interfaces (ENI). Once
+created, an ENI can be attached to instances and/or be associated with
+a public IP address. ENIs can only be used in conjunction with VPC
+instances.
+
+=head2 $interface = $ec2->create_network_interface($subnet_id)
+
+=head2 $interface = $ec2->create_network_interface(%args)
+
+This method creates an elastic network interface (ENI). If only a
+single argument is provided, it is treated as the ID of the VPC subnet
+to associate with the ENI. If multiple arguments are provided, they
+are treated as -arg=>value parameter pairs.
+
+Arguments:
+
+The -subnet_id argument is mandatory. Others are optional.
+
+ -subnet_id           --  ID of the VPC subnet to associate with the network
+                           interface (mandatory)
+
+ -private_ip_address  --  The primary private IP address of the network interface,
+                           or a reference to an array of private IP addresses. In the
+                           latter case, the first element of the array becomes the
+                           primary address, and the subsequent ones become secondary
+                           addresses. If no private IP address is specified, one will
+                           be chosen for you. See below for more information on this
+                           parameter.
+
+ -private_ip_addresses -- Same as -private_ip_address, for readability.
+
+ -secondary_ip_address_count -- An integer requesting this number of secondary IP
+                          addresses to be allocated automatically. If present, 
+                          cannot provide any secondary addresses explicitly.
+
+ -description          -- Description of this ENI.
+
+ -security_group_id    -- Array reference or scalar containing IDs of the security
+                           group(s) to assign to this interface.
+
+You can assign multiple IP addresses to the interface explicitly, or
+by allowing EC2 to choose addresses within the designated subnet
+automatically. The following examples demonstrate the syntax:
+
+ # one primary address, chosen explicitly
+ -private_ip_address => '192.168.0.12'
+
+ # one primary address and two secondary addresses, chosen explicitly
+ -private_ip_address => ['192.168.0.12','192.168.0.200','192.168.0.201'] 
+
+ # one primary address chosen explicitly, and two secondaries chosen automatically
+ -private_ip_address => ['192.168.0.12','auto','auto']
+
+ # one primary address chosen explicitly, and two secondaries chosen automatically (another syntax)
+ -private_ip_address => ['192.168.0.12',2]
+
+ # one primary address chosen automatically, and two secondaries chosen automatically
+ -private_ip_address => [auto,2]
+
+You cannot assign some secondary addresses explicitly and others
+automatically on the same ENI. If you provide no -private_ip_address
+parameter at all, then a single private IP address will be chosen for
+you (the same as -private_ip_address=>'auto').
+
+The return value is a VM::EC2::NetworkInterface object
+
+=cut
+
+# NOTE: there is code overlap with network_interface_parm()
+sub create_network_interface {
+    my $self = shift;
+    my %args = $self->args(-subnet_id=>@_);
+    $args{-subnet_id} or croak "Usage: create_network_interface(-subnet_id=>\$id,\@more_args)";
+    my   @parm = $self->single_parm('SubnetId',\%args);
+    push @parm,  $self->single_parm('Description',\%args);
+    push @parm,  $self->list_parm('SecurityGroupId',\%args);
+
+    my $address   = $args{-private_ip_address} || $args{-private_ip_addresses};
+    my $auto_count;
+
+    if ($address) {
+	my $c = 0;
+
+	my @addresses = ref $address && ref $address eq 'ARRAY' ? @$address : ($address);
+	my $primary   = shift @addresses;
+	unless ($primary eq 'auto') {
+	    push @parm, ("PrivateIpAddresses.$c.PrivateIpAddress" => $primary);
+	    push @parm, ("PrivateIpAddresses.$c.Primary"          => 'true');
+	}
+
+	# deal with automatic secondary addresses .. this seems needlessly complex
+	if (my @auto = grep {/auto/i} @addresses) {
+	    @auto == @addresses or croak "cannot request both explicit and automatic secondary IP addresses";
+	    $auto_count = @auto;
+	}
+	$auto_count = $addresses[0] if @addresses == 1 && $addresses[0] =~ /^\d+$/;
+	$auto_count ||= $args{-secondary_ip_address_count};
+	
+	unless ($auto_count) {
+	    foreach (@addresses) {
+		$c++;
+		push @parm,("PrivateIpAddresses.$c.PrivateIpAddress" => $_     );
+		push @parm,("PrivateIpAddresses.$c.Primary"          => 'false');
+	    }
+	}
+    }
+    push @parm,('SecondaryPrivateIpAddressCount'=>$auto_count) if $auto_count ||= $args{-secondary_ip_address_count};
+
+    $self->call('CreateNetworkInterface',@parm);
+}
+
+=head2 $result = $ec2->assign_private_ip_addresses(%args)
+
+Assign one or more secondary private IP addresses to a network
+interface. You can either set the addresses explicitly, or provide a
+count of secondary addresses, and let Amazon select them for you.
+
+Required arguments:
+
+ -network_interface_id    The network interface to which the IP address(es)
+                          will be assigned.
+
+ -private_ip_address      One or more secondary IP addresses, as a scalar string
+ -private_ip_addresses    or array reference. (The two arguments are equivalent).
+
+Optional arguments:
+
+ -allow_reassignment      If true, allow assignment of an IP address is already in
+                          use by another network interface or instance.
+
+The following are valid arguments to -private_ip_address:
+
+ -private_ip_address => '192.168.0.12'                    # single address
+ -private_ip_address => ['192.168.0.12','192.168.0.13]    # multiple addresses
+ -private_ip_address => 3                                 # autoselect three addresses
+
+The mixed form of address, such as ['192.168.0.12','auto'] is not allowed in this call.
+
+On success, this method returns true.
+
+=cut
+
+sub assign_private_ip_addresses {
+    my $self = shift;
+    my %args = $self->args(-network_interface_id => @_);
+    $args{-private_ip_address} ||= $args{-private_ip_addresses};
+    $args{-network_interface_id} && $args{-private_ip_address}
+      or croak "usage: assign_private_ip_addresses(-network_interface_id=>\$id,-private_ip_address=>\\\@addresses)";
+    my @parms = $self->single_parm('NetworkInterfaceId',\%args);
+
+    if (!ref($args{-private_ip_address}) && $args{-private_ip_address} =~ /^\d+$/) {
+	push @parms,('SecondaryPrivateIpAddressCount' => $args{-private_ip_address});
+    } else {
+	push @parms,$self->list_parm('PrivateIpAddress',\%args);
+    }
+    push @parms,('AllowReassignment' => $args{-allow_reassignment} ? 'true' : 'false')
+	if exists $args{-allow_reassignment};
+    $self->call('AssignPrivateIpAddresses',@parms);
+}
+
+=head2 $result = $ec2->unassign_private_ip_addresses(%args)
+
+Unassign one or more secondary private IP addresses from a network
+interface.
+
+Required arguments:
+
+ -network_interface_id    The network interface to which the IP address(es)
+                          will be assigned.
+
+ -private_ip_address      One or more secondary IP addresses, as a scalar string
+ -private_ip_addresses    or array reference. (The two arguments are equivalent).
+
+
+The following are valid arguments to -private_ip_address:
+
+ -private_ip_address => '192.168.0.12'                    # single address
+ -private_ip_address => ['192.168.0.12','192.168.0.13]    # multiple addresses
+
+On success, this method returns true.
+
+=cut
+
+sub unassign_private_ip_addresses {
+    my $self = shift;
+    my %args = $self->args(-network_interface_id => @_);
+    $args{-private_ip_address} ||= $args{-private_ip_addresses};
+    $args{-network_interface_id} && $args{-private_ip_address}
+      or croak "usage: assign_private_ip_addresses(-network_interface_id=>\$id,-private_ip_address=>\\\@addresses)";
+    my @parms = $self->single_parm('NetworkInterfaceId',\%args);
+    push @parms,$self->list_parm('PrivateIpAddress',\%args);
+    $self->call('UnassignPrivateIpAddresses',@parms);
+}
+
+=head2 $result = $ec2->delete_network_interface($network_interface_id);
+
+=head2 $result = $ec2->delete_network_interface(-network_interface_id => $id);
+
+Deletes the specified network interface. Returns a boolean indicating
+success of the delete operation.
+
+=cut
+
+sub delete_network_interface {
+    my $self = shift;
+    my %args  = $self->args(-network_interface_id => @_);
+    my @param = $self->single_parm(NetworkInterfaceId=>\%args);
+    return $self->call('DeleteNetworkInterface',@param);
+}
+
+=head2 @ifs = $ec2->describe_network_interfaces(@interface_ids)
+
+=head2 @ifs = $ec2->describe_network_interfaces(\%filters)
+
+=head2 @ifs = $ec2->describe_network_interfaces(-network_interface_id=>\@interface_ids,-filter=>\%filters)
+
+Return a list of elastic network interfaces as
+VM::EC2::VPC::NetworkInterface objects. You may restrict the list by
+passing a list of network interface IDs, a hashref of filters or by
+using the full named-parameter form.
+
+Optional arguments:
+
+ -network_interface_id    A single network interface ID or an arrayref to
+                           a list of IDs.
+
+ -filter                  A hashref for filtering on tags and other attributes.
+
+The list of valid filters can be found at
+http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeNetworkInterfaces.html.
+
+=cut
+
+sub describe_network_interfaces {
+    my $self = shift;
+    my %args = $self->args(-network_interface_id=>@_);
+    my @params = $self->list_parm('NetworkInterfaceId',\%args);
+    push @params,$self->filter_parm(\%args);
+    return $self->call('DescribeNetworkInterfaces',@params);
+}
+
+=head2 @data = $ec2->describe_network_interface_attribute($network_id,$attribute)
+
+This method returns network interface attributes. Only one attribute
+can be retrieved at a time. The following is the list of attributes
+that can be retrieved:
+
+ description           -- hashref
+ groupSet              -- hashref
+ sourceDestCheck       -- hashref
+ attachment            -- hashref
+
+These values can be retrieved more conveniently from the
+L<VM::EC2::NetworkInterface> object, so there is no attempt to parse
+the results of this call into Perl objects.
+
+=cut
+
+sub describe_network_interface_attribute {
+    my $self = shift;
+    @_ == 2 or croak "Usage: describe_network_interface_attribute(\$interface_id,\$attribute_name)";
+    my ($interface_id,$attribute) = @_;
+    my @param  = (NetworkInterfaceId=>$interface_id,Attribute=>$attribute);
+    my $result = $self->call('DescribeNetworkInterfaceAttribute',@param);
+    return $result && $result->attribute($attribute);
+}
+
+=head2 $boolean = $ec2->modify_network_interface_attribute($interface_id,-$attribute_name=>$value)
+
+This method changes network interface attributes. Only one attribute can be set per call
+The following is the list of attributes that can be set:
+
+ -description             -- interface description
+ -security_group_id       -- single security group ID or arrayref to a list of group ids
+ -source_dest_check       -- boolean; if false enables packets to be forwarded, and is necessary
+                               for NAT and other router tasks
+ -delete_on_termination   -- [$attachment_id=>$delete_on_termination]; Pass this a two-element
+                               array reference consisting of the attachment ID and a boolean 
+                               indicating whether deleteOnTermination should be enabled for
+                               this attachment.
+=cut
+
+sub modify_network_interface_attribute {
+    my $self = shift;
+    my $interface_id = shift or croak "Usage: modify_network_interface_attribute(\$interfaceId,%param)";
+    my %args   = @_;
+    my @param  = (NetworkInterfaceId=>$interface_id);
+    push @param,$self->value_parm($_,\%args) foreach qw(Description SourceDestCheck);
+    push @param,$self->list_parm('SecurityGroupId',\%args);
+    if (my $dot = $args{-delete_on_termination}) {
+	my ($attachment_id,$delete_on_termination) = @$dot;
+	push @param,'Attachment.AttachmentId'=>$attachment_id;
+	push @param,'Attachment.DeleteOnTermination'=>$delete_on_termination ? 'true' : 'false';
+    }
+    return $self->call('ModifyNetworkInterfaceAttribute',@param);
+}
+
+=head2 $boolean = $ec2->reset_network_interface_attribute($interface_id => $attribute_name)
+
+This method resets the named network interface attribute to its
+default value. Only one attribute can be reset per call. The AWS
+documentation is not completely clear on this point, but it appears
+that the only attribute that can be reset using this method is:
+
+ source_dest_check       -- Turns on source destination checking 
+
+For consistency with modify_network_interface_attribute, you may
+specify attribute names with or without a leading dash, and using
+either under_score or mixedCase naming:
+
+ $ec2->reset_network_interface_atribute('eni-12345678' => 'source_dest_check');
+ $ec2->reset_network_interface_atribute('eni-12345678' => '-source_dest_check');
+ $ec2->reset_network_interface_atribute('eni-12345678' => sourceDestCheck);
+
+=cut
+
+sub reset_network_interface_attribute {
+    my $self = shift;
+    @_ == 2 or croak "Usage: reset_network_interface_attribute(\$interfaceId,\$attribute)";
+    my ($interface_id,$attribute) = @_;
+
+    $attribute = s/^-//;
+    $attribute = $self->uncanonicalize($attribute);
+    my @param = (NetworkInterfaceId=> $interface_id,
+		 Attribute         => $attribute
+	);
+    return $self->call('ResetNetworkInterfaceAttribute',@param);
+}
+
+=head2 $attachmentId = $ec2->attach_network_interface($network_interface_id,$instance_id,$device_index)
+
+=head2 $attachmentId = $ec2->attach_network_interface(-network_interface_id => $id,
+                                                      -instance_id          => $id,
+                                                      -device_index         => $index)
+
+This method attaches a network interface to an instance using the
+indicated device index. You can use instance and network interface
+IDs, or VM::EC2::Instance and VM::EC2::NetworkInterface objects. You
+may use an integer for -device_index, or use the strings "eth0",
+"eth1" etc.
+
+Required arguments:
+
+ -network_interface_id ID of the network interface to attach.
+ -instance_id          ID of the instance to attach the interface to.
+ -device_index         Network device number to use (e.g. 0 for eth0).
+
+On success, this method returns the attachmentId of the new attachment
+(not a VM::EC2::NetworkInterface::Attachment object, due to an AWS API
+inconsistency).
+
+Note that it may be more convenient to attach and detach network
+interfaces via methods in the VM::EC2::Instance and
+VM::EC2::NetworkInterface objects:
+
+ $instance->attach_network_interface($interface=>'eth0');
+ $interface->attach($instance=>'eth0');
+
+=cut
+
+sub attach_network_interface {
+    my $self = shift;
+    my %args; 
+    if ($_[0] !~ /^-/ && @_ == 3) { 
+	@args{qw(-network_interface_id -instance_id -device_index)} = @_; 
+    } else { 
+	%args = @_;
+    }
+    $args{-network_interface_id} && $args{-instance_id} && defined $args{-device_index} or
+	croak "-network_interface_id, -instance_id and -device_index arguments must all be specified";
+
+    $args{-device_index} =~ s/^eth//;
+    
+    my @param = $self->single_parm(NetworkInterfaceId=>\%args);
+    push @param,$self->single_parm(InstanceId=>\%args);
+    push @param,$self->single_parm(DeviceIndex=>\%args);
+    return $self->call('AttachNetworkInterface',@param);
+}
+
+=head2 $boolean = $ec2->detach_network_interface($attachment_id [,$force])
+
+This method detaches a network interface from an instance. Both the
+network interface and instance are specified using their
+attachmentId. If the $force flag is present, and true, then the
+detachment will be forced even if the interface is in use.
+
+Note that it may be more convenient to attach and detach network
+interfaces via methods in the VM::EC2::Instance and
+VM::EC2::NetworkInterface objects:
+
+ $instance->detach_network_interface($interface);
+ $interface->detach();
+
+=cut
+
+sub detach_network_interface {
+    my $self = shift;
+    my ($attachment_id,$force) = @_;
+    $attachment_id or croak "Usage: detach_network_interface(\$attachment_id [,\$force])";
+    my @param = (AttachmentId => $attachment_id);
+    push @param,(Force => 'true') if defined $force && $force;
+    return $self->call('DetachNetworkInterface',@param);
+}
 
 =head1 AWS SECURITY TOKENS
 
@@ -3516,7 +4858,7 @@ the user is allowed to access.
 
 =over 4
 
-=item Required parameters:
+=item Required arguments:
 
  -name The username
 
@@ -3524,7 +4866,7 @@ The username must comply with the guidelines described in
 http://docs.amazonwebservices.com/IAM/latest/UserGuide/LimitationsOnEntities.html:
 essentially all alphanumeric plus the characters [+=,.@-].
 
-=item Optional parameters:
+=item Optional arguments:
 
  -duration_seconds Length of time the session token will be valid for,
                     expressed in seconds. 
@@ -3562,7 +4904,7 @@ sub get_federation_token {
 }
 
 
-=head2 $token = $ec2->get_session_token(@args)
+=head2 $token = $ec2->get_session_token(%args)
 
 This method creates a temporary VM::EC2::Security::Token object for an
 anonymous user. The token has no policy associated with it, and can be
@@ -3572,11 +4914,11 @@ conjunction with MFA devices.
 
 =over 4
 
-=item Required parameters:
+=item Required arguments:
 
 none
 
-=item Optional parameters:
+=item Optional arguments:
 
  -duration_seconds Length of time the session token will be valid for,
                     expressed in seconds.
@@ -3650,7 +4992,7 @@ sub instance_parm {
     return ref $id && ref $id eq 'ARRAY' ? @$id : $id;
 }
 
-=head2 @parameters = $ec2->value_parm(ParameterName => \%args)
+=head2 @arguments = $ec2->value_parm(ParameterName => \%args)
 
 =cut
 
@@ -3663,7 +5005,7 @@ sub value_parm {
     return ("$argname.Value"=>$val);
 }
 
-=head2 @parameters = $ec2->single_parm(ParameterName => \%args)
+=head2 @arguments = $ec2->single_parm(ParameterName => \%args)
 
 =cut
 
@@ -3677,7 +5019,7 @@ sub single_parm {
     return ($argname=>$v);
 }
 
-=head2 @parameters = $ec2->list_parm(ParameterName => \%args)
+=head2 @arguments = $ec2->list_parm(ParameterName => \%args)
 
 =cut
 
@@ -3697,7 +5039,7 @@ sub list_parm {
     return @params;
 }
 
-=head2 @parameters = $ec2->filter_parm(\%args)
+=head2 @arguments = $ec2->filter_parm(\%args)
 
 =cut
 
@@ -3707,7 +5049,7 @@ sub filter_parm {
     return $self->key_value_parameters('Filter','Name','Value',$args);
 }
 
-=head2 @parameters = $ec2->tagcreate_parm(\%args)
+=head2 @arguments = $ec2->tagcreate_parm(\%args)
 
 =cut
 
@@ -3717,7 +5059,7 @@ sub tagcreate_parm {
     return $self->key_value_parameters('Tag','Key','Value',$args);
 }
 
-=head2 @parameters = $ec2->tagdelete_parm(\%args)
+=head2 @arguments = $ec2->tagdelete_parm(\%args)
 
 =cut
 
@@ -3727,7 +5069,7 @@ sub tagdelete_parm {
     return $self->key_value_parameters('Tag','Key','Value',$args,1);
 }
 
-=head2 @parameters = $ec2->key_value_parameters($param_name,$keyname,$valuename,\%args,$skip_undef_values)
+=head2 @arguments = $ec2->key_value_parameters($param_name,$keyname,$valuename,\%args,$skip_undef_values)
 
 =cut
 
@@ -3767,7 +5109,7 @@ sub key_value_parameters {
     return @params;
 }
 
-=head2 @parameters = $ec2->launch_perm_parm($prefix,$suffix,$value)
+=head2 @arguments = $ec2->launch_perm_parm($prefix,$suffix,$value)
 
 =cut
 
@@ -3799,7 +5141,7 @@ sub _perm_parm {
     return @param;
 }
 
-=head2 @parameters = $ec2->iam_parm($args)
+=head2 @arguments = $ec2->iam_parm($args)
 
 =cut
 
@@ -3812,7 +5154,7 @@ sub iam_parm {
     return @p;
 }
 
-=head2 @parameters = $ec2->block_device_parm($block_device_mapping_string)
+=head2 @arguments = $ec2->block_device_parm($block_device_mapping_string)
 
 =cut
 
@@ -3841,11 +5183,60 @@ sub block_device_parm {
 	} elsif ($blockdevice =~ /^ephemeral\d$/) {
 	    push @p,("BlockDeviceMapping.$c.VirtualName"=>$blockdevice);
 	} else {
-	    my ($snapshot,$size,$delete_on_term) = split ':',$blockdevice;
-	    push @p,("BlockDeviceMapping.$c.Ebs.SnapshotId" =>$snapshot)                if $snapshot;
+	    my ($snapshot,$size,$delete_on_term,$vtype,$iops) = split ':',$blockdevice;
+	    push @p,("BlockDeviceMapping.$c.Ebs.SnapshotId" =>$snapshot)               if $snapshot;
 	    push @p,("BlockDeviceMapping.$c.Ebs.VolumeSize" =>$size)                   if $size;
 	    push @p,("BlockDeviceMapping.$c.Ebs.DeleteOnTermination"=>$delete_on_term) 
-		if defined $delete_on_term  && $delete_on_term=~/^(true|false|1|0)$/
+		if defined $delete_on_term  && $delete_on_term=~/^(true|false|1|0)$/;
+	    push @p,("BlockDeviceMapping.$c.Ebs.VolumeType"=>$vtype)                    if $vtype;
+	    push @p,("BlockDeviceMapping.$c.Ebs.Iops"=>$iops)                           if $iops;
+	}
+	$c++;
+    }
+    return @p;
+}
+
+# ['eth0=eni-123456','eth1=192.168.2.1,192.168.3.1,192.168.4.1:subnet-12345:sg-12345:true:My Weird Network']
+# form 1: ethX=network device id
+# form 2: ethX=primary_address,secondary_address1,secondary_address2...:subnetId:securityGroupId:deleteOnTermination:description
+# form 3: ethX=primary_address,secondary_address_count:subnetId:securityGroupId:deleteOnTermination:description
+sub network_interface_parm {
+    my $self = shift;
+    my $args    = shift;
+    my $devlist = $args->{-network_interfaces} or return;
+    my @dev     = ref $devlist && ref $devlist eq 'ARRAY' ? @$devlist : $devlist;
+
+    my @p;
+    my $c = 0;
+    for my $d (@dev) {
+	$d =~ /^eth(\d+)\s*=\s*([^=]+)$/ or croak "network device mapping must be in format ethX=option-string";
+
+	my ($device_index,$device_options) = ($1,$2);
+	push @p,("NetworkInterface.$c.DeviceIndex" => $device_index);
+	my @options = split ':',$device_options;
+	if (@options == 1) {
+	    push @p,("NetworkInterface.$c.NetworkInterfaceId" => $options[0]);
+	} 
+	else {
+	    my ($ip_addresses,$subnet_id,$security_group_id,$delete_on_termination,$description) = @options;
+	    my @addresses = split /\s*,\s*/,$ip_addresses;
+	    for (my $a = 0; $a < @addresses; $a++) {
+		if ($addresses[$a] =~ /^\d+\.\d+\.\d+\.\d+$/ ) {
+		    push @p,("NetworkInterface.$c.PrivateIpAddresses.$a.PrivateIpAddress" => $addresses[$a]);
+		    push @p,("NetworkInterface.$c.PrivateIpAddresses.$a.Primary"          => $a == 0 ? 'true' : 'false');
+		}
+		elsif ($addresses[$a] =~ /^\d+$/ && $a > 0) {
+		    push @p,("NetworkInterface.$c.SecondaryPrivateIpAddressCount"        => $addresses[$a]);
+		}
+	    }
+	    my @sgs = split ',',$security_group_id;
+	    for (my $i=0;$i<@sgs;$i++) {
+		push @p,("NetworkInterface.$c.SecurityGroupId.$i" => $sgs[$i]);
+	    }
+
+	    push @p,("NetworkInterface.$c.SubnetId"              => $subnet_id)             if length $subnet_id;
+	    push @p,("NetworkInterface.$c.DeleteOnTermination"   => $delete_on_termination) if length $delete_on_termination;
+	    push @p,("NetworkInterface.$c.Description"           => $description)           if length $description;
 	}
 	$c++;
     }
@@ -3895,7 +5286,7 @@ sub ua {
 
 =head2 @obj = $ec2->call($action,@param);
 
-Make a call to Amazon using $action and the passed parameters, and
+Make a call to Amazon using $action and the passed arguments, and
 return a list of objects.
 
 =cut
@@ -4013,65 +5404,34 @@ sub args {
 As of 30 July 2012, the following Amazon API calls were NOT
 implemented. Volumteers to implement these calls are most welcome.
 
-AssociateDhcpOptions
-AssociateRouteTable
-AttachInternetGateway
-AttachNetworkInterface
 AttachVpnGateway
 BundleInstance
 CancelBundleTask
 CancelConversionTask
 CreateCustomerGateway
-CreateDhcpOptions
-CreateInternetGateway
 CreateNetworkAcl
 CreateNetworkAclEntry
-CreateNetworkInterface
 CreatePlacementGroup
-CreateRoute
-CreateRouteTable
-CreateSubnet
-CreateVpc
 CreateVpnConnection
 CreateVpnGateway
 DeleteCustomerGateway
-DeleteDhcpOptions
-DeleteInternetGateway
 DeleteNetworkAcl
 DeleteNetworkAclEntry
-DeleteNetworkInterface
 DeletePlacementGroup
-DeleteRoute
-DeleteRouteTable
-DeleteSubnet
-DeleteVpc
 DeleteVpnConnection
 DeleteVpnGateway
 DescribeBundleTasks
 DescribeConversionTasks
 DescribeCustomerGateways
-DescribeDhcpOptions
 DescribeNetworkAcls
-DescribeNetworkInterfaces
-DescribeNetworkInterfaceAttribute
 DescribePlacementGroups
-DescribeRouteTables
-DescribeSubnets
-DescribeVpcs
 DescribeVpnConnections
 DescribeVpnGateways
-DetachInternetGateway
-DetachNetworkInterface
 DetachVpnGateway
-DisassociateRouteTable
 ImportInstance
 ImportVolume
-ModifyNetworkInterfaceAttribute
 ReplaceNetworkAclAssociation
 ReplaceNetworkAclEntry
-ReplaceRoute
-ReplaceRouteTableAssociation
-ResetNetworkInterfaceAttribute
 
 =head1 OTHER INFORMATION
 
@@ -4109,7 +5469,7 @@ create objects from the parsed XML. There are three possible syntaxes:
     content of the response, and the VM::EC2 object used to generate the
     request.
 
- 2) A VM::EC2::Dispatch method name, optionally followed by its parameters
+ 2) A VM::EC2::Dispatch method name, optionally followed by its arguments
     delimited by commas. Example:
 
            "fetch_items,securityGroupInfo,VM::EC2::SecurityGroup"

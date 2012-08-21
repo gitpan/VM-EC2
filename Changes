@@ -1,3 +1,9 @@
+1.16 Tue Aug 21 07:34:35 EDT 2012
+    - Added support for most VPC-related calls (VPCs, subnets, routes, network interfaces).
+    - Added support for elastic network interfaces.
+    - Added support for high-IOPS volumes.
+    - Update requirements to indicate that File::Path 2.08 is needed.
+
 1.15 Tue Aug 14 07:18:04 EDT 2012
     - Allow ephemeral storage to be specified in migrate-ebs-image.pl using the -b argument.
     - Add -block_device_mapping option to create_image().
@@ -13,7 +19,6 @@
     - Fix bugs that occurred when working with staging volumes that were attached
       to stopped server instances.
     - No longer assign automatic labels to new staging volumes.
-    
 
 1.12 Fri Aug  3 23:48:46 EDT 2012
     - Tests no longer prompt for input when running under smoker.
