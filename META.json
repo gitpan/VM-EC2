@@ -33,7 +33,7 @@
    "provides" : {
       "VM::EC2" : {
          "file" : "lib/VM/EC2.pm",
-         "version" : "1.16"
+         "version" : "1.17"
       },
       "VM::EC2::AvailabilityZone" : {
          "file" : "lib/VM/EC2/AvailabilityZone.pm",
@@ -95,6 +95,10 @@
          "file" : "lib/VM/EC2/Instance/ConsoleOutput.pm",
          "version" : 0
       },
+      "VM::EC2::Instance::IamProfile" : {
+         "file" : "lib/VM/EC2/Instance/IamProfile.pm",
+         "version" : 0
+      },
       "VM::EC2::Instance::Metadata" : {
          "file" : "lib/VM/EC2/Instance/Metadata.pm",
          "version" : 0
@@ -141,6 +145,22 @@
       },
       "VM::EC2::KeyPair" : {
          "file" : "lib/VM/EC2/KeyPair.pm",
+         "version" : 0
+      },
+      "VM::EC2::NetworkInterface" : {
+         "file" : "lib/VM/EC2/NetworkInterface.pm",
+         "version" : 0
+      },
+      "VM::EC2::NetworkInterface::Association" : {
+         "file" : "lib/VM/EC2/NetworkInterface/Association.pm",
+         "version" : 0
+      },
+      "VM::EC2::NetworkInterface::Attachment" : {
+         "file" : "lib/VM/EC2/NetworkInterface/Attachment.pm",
+         "version" : 0
+      },
+      "VM::EC2::NetworkInterface::PrivateIpAddress" : {
+         "file" : "lib/VM/EC2/NetworkInterface/PrivateIpAddress.pm",
          "version" : 0
       },
       "VM::EC2::ProductCode" : {
@@ -235,6 +255,38 @@
          "file" : "lib/VM/EC2/Tag.pm",
          "version" : 0
       },
+      "VM::EC2::VPC" : {
+         "file" : "lib/VM/EC2/VPC.pm",
+         "version" : 0
+      },
+      "VM::EC2::VPC::DhcpOptions" : {
+         "file" : "lib/VM/EC2/VPC/DhcpOptions.pm",
+         "version" : 0
+      },
+      "VM::EC2::VPC::InternetGateway" : {
+         "file" : "lib/VM/EC2/VPC/InternetGateway.pm",
+         "version" : 0
+      },
+      "VM::EC2::VPC::InternetGateway::Attachment" : {
+         "file" : "lib/VM/EC2/VPC/InternetGateway/Attachment.pm",
+         "version" : 0
+      },
+      "VM::EC2::VPC::Route" : {
+         "file" : "lib/VM/EC2/VPC/Route.pm",
+         "version" : 0
+      },
+      "VM::EC2::VPC::RouteTable" : {
+         "file" : "lib/VM/EC2/VPC/RouteTable.pm",
+         "version" : 0
+      },
+      "VM::EC2::VPC::RouteTable::Association" : {
+         "file" : "lib/VM/EC2/VPC/RouteTable/Association.pm",
+         "version" : 0
+      },
+      "VM::EC2::VPC::Subnet" : {
+         "file" : "lib/VM/EC2/VPC/Subnet.pm",
+         "version" : 0
+      },
       "VM::EC2::Volume" : {
          "file" : "lib/VM/EC2/Volume.pm",
          "version" : 0
@@ -266,5 +318,5 @@
          "http://dev.perl.org/licenses/"
       ]
    },
-   "version" : "1.16"
+   "version" : "1.17"
 }
