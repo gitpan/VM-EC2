@@ -4,7 +4,7 @@
       "Lincoln Stein <lincoln.stein@oicr.on.ca>"
    ],
    "dynamic_config" : 1,
-   "generated_by" : "Module::Build version 0.38, CPAN::Meta::Converter version 2.110440",
+   "generated_by" : "Module::Build version 0.38, CPAN::Meta::Converter version 2.112150",
    "license" : [
       "perl_5"
    ],
@@ -33,7 +33,7 @@
    "provides" : {
       "VM::EC2" : {
          "file" : "lib/VM/EC2.pm",
-         "version" : "1.17"
+         "version" : "1.18"
       },
       "VM::EC2::AvailabilityZone" : {
          "file" : "lib/VM/EC2/AvailabilityZone.pm",
@@ -61,6 +61,58 @@
       },
       "VM::EC2::Dispatch" : {
          "file" : "lib/VM/EC2/Dispatch.pm",
+         "version" : 0
+      },
+      "VM::EC2::ELB" : {
+         "file" : "lib/VM/EC2/ELB.pm",
+         "version" : 0
+      },
+      "VM::EC2::ELB::BackendServerDescription" : {
+         "file" : "lib/VM/EC2/ELB/BackendServerDescription.pm",
+         "version" : 0
+      },
+      "VM::EC2::ELB::HealthCheck" : {
+         "file" : "lib/VM/EC2/ELB/HealthCheck.pm",
+         "version" : 0
+      },
+      "VM::EC2::ELB::InstanceState" : {
+         "file" : "lib/VM/EC2/ELB/InstanceState.pm",
+         "version" : 0
+      },
+      "VM::EC2::ELB::Listener" : {
+         "file" : "lib/VM/EC2/ELB/Listener.pm",
+         "version" : 0
+      },
+      "VM::EC2::ELB::ListenerDescription" : {
+         "file" : "lib/VM/EC2/ELB/ListenerDescription.pm",
+         "version" : 0
+      },
+      "VM::EC2::ELB::Policies" : {
+         "file" : "lib/VM/EC2/ELB/Policies.pm",
+         "version" : 0
+      },
+      "VM::EC2::ELB::Policies::AppCookieStickinessPolicy" : {
+         "file" : "lib/VM/EC2/ELB/Policies/AppCookieStickinessPolicy.pm",
+         "version" : 0
+      },
+      "VM::EC2::ELB::Policies::LBCookieStickinessPolicy" : {
+         "file" : "lib/VM/EC2/ELB/Policies/LBCookieStickinessPolicy.pm",
+         "version" : 0
+      },
+      "VM::EC2::ELB::PolicyAttribute" : {
+         "file" : "lib/VM/EC2/ELB/PolicyAttribute.pm",
+         "version" : 0
+      },
+      "VM::EC2::ELB::PolicyAttributeType" : {
+         "file" : "lib/VM/EC2/ELB/PolicyAttributeType.pm",
+         "version" : 0
+      },
+      "VM::EC2::ELB::PolicyDescription" : {
+         "file" : "lib/VM/EC2/ELB/PolicyDescription.pm",
+         "version" : 0
+      },
+      "VM::EC2::ELB::PolicyTypeDescription" : {
+         "file" : "lib/VM/EC2/ELB/PolicyTypeDescription.pm",
          "version" : 0
       },
       "VM::EC2::ElasticAddress" : {
@@ -259,6 +311,10 @@
          "file" : "lib/VM/EC2/VPC.pm",
          "version" : 0
       },
+      "VM::EC2::VPC::CustomerGateway" : {
+         "file" : "lib/VM/EC2/VPC/CustomerGateway.pm",
+         "version" : 0
+      },
       "VM::EC2::VPC::DhcpOptions" : {
          "file" : "lib/VM/EC2/VPC/DhcpOptions.pm",
          "version" : 0
@@ -269,6 +325,18 @@
       },
       "VM::EC2::VPC::InternetGateway::Attachment" : {
          "file" : "lib/VM/EC2/VPC/InternetGateway/Attachment.pm",
+         "version" : 0
+      },
+      "VM::EC2::VPC::NetworkAcl" : {
+         "file" : "lib/VM/EC2/VPC/NetworkAcl.pm",
+         "version" : 0
+      },
+      "VM::EC2::VPC::NetworkAcl::Association" : {
+         "file" : "lib/VM/EC2/VPC/NetworkAcl/Association.pm",
+         "version" : 0
+      },
+      "VM::EC2::VPC::NetworkAcl::Entry" : {
+         "file" : "lib/VM/EC2/VPC/NetworkAcl/Entry.pm",
          "version" : 0
       },
       "VM::EC2::VPC::Route" : {
@@ -285,6 +353,22 @@
       },
       "VM::EC2::VPC::Subnet" : {
          "file" : "lib/VM/EC2/VPC/Subnet.pm",
+         "version" : 0
+      },
+      "VM::EC2::VPC::VpnConnection" : {
+         "file" : "lib/VM/EC2/VPC/VpnConnection.pm",
+         "version" : 0
+      },
+      "VM::EC2::VPC::VpnGateway" : {
+         "file" : "lib/VM/EC2/VPC/VpnGateway.pm",
+         "version" : 0
+      },
+      "VM::EC2::VPC::VpnGateway::Attachment" : {
+         "file" : "lib/VM/EC2/VPC/VpnGateway/Attachment.pm",
+         "version" : 0
+      },
+      "VM::EC2::VPC::VpnTunnelTelemetry" : {
+         "file" : "lib/VM/EC2/VPC/VpnTunnelTelemetry.pm",
          "version" : 0
       },
       "VM::EC2::Volume" : {
@@ -318,5 +402,5 @@
          "http://dev.perl.org/licenses/"
       ]
    },
-   "version" : "1.17"
+   "version" : "1.18"
 }
