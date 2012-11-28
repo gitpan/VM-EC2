@@ -12,7 +12,7 @@ VM::EC2::Staging::Manager - Automate VMs and volumes for moving data in and out 
  my $staging = $ec2->staging_manager(-on_exit     => 'stop', # default, stop servers when process exists
                                      -verbose     => 1,      # default, verbose progress messages
                                      -scan        => 1,      # default, scan region for existing staging servers and volumes
-                                     -image_name  => 'ubuntu-maverick-10.10', # default server image
+                                     -image_name  => 'ubuntu-precise-12.04',  # default server image
                                      -user_name   => 'ubuntu',                # default server login name
                                      );
 
@@ -84,6 +84,7 @@ VM::EC2::Staging::Manager - Automate VMs and volumes for moving data in and out 
  $staging->stop_all_servers();
  $staging->start_all_servers();
  $staging->terminate_all_servers();
+ $staging->force_terminate_all_servers();
 
 =head1 DESCRIPTION
 
@@ -132,16 +133,16 @@ the same region will return the same one each time.
 
 use strict;
 use VM::EC2;
-# use VM::EC2::Staging::Volume;
-# use VM::EC2::Staging::Server;
 use Carp 'croak','longmess';
 use File::Spec;
 use File::Path 'make_path','remove_tree';
-use File::Basename 'dirname';
+use File::Basename 'dirname','basename';
 use Scalar::Util 'weaken';
+use String::Approx 'adistr';
 
-use constant                     GB => 1_073_741_824;
+use constant GB => 1_073_741_824;
 use constant SERVER_STARTUP_TIMEOUT => 120;
+use constant LOCK_TIMEOUT  => 10;
 use constant VERBOSE_DEBUG => 3;
 use constant VERBOSE_INFO  => 2;
 use constant VERBOSE_WARN  => 1;
@@ -190,7 +191,7 @@ servers and volumes.
                 or "terminate".
 
  -image_name    Name or ami ID of the AMI to use for creating the
-                instances of new servers. Defaults to 'ubuntu-maverick-10.10'.
+                instances of new servers. Defaults to 'ubuntu-precise-12.04'.
                 If the image name begins with "ami-", then it is 
                 treated as an AMI ID. Otherwise it is treated as
                 a name pattern and will be used to search the AMI
@@ -405,6 +406,12 @@ currently be detected and transferred automatically by copy_image():
                                  -description   => 'My AMI western style',
                                  -block_devices => '/dev/sde=ephemeral0');
 
+=head2 $dest_kernel = $manager->match_kernel($src_kernel,$dest_zone)
+
+Find a kernel in $dest_zone that matches the $src_kernel in the
+current zone. $dest_zone can be a VM::EC2::Staging manager object, a
+region name, or a VM::EC2::Region object.
+
 =cut
 
 #############################################
@@ -426,26 +433,7 @@ sub copy_image {
     $image->rootDeviceType eq 'ebs'
 	or croak "It is not currently possible to migrate instance-store backed images between regions via this method";
         
-    my $dest_manager;
-    if (ref $destination && $destination->isa('VM::EC2::Staging::Manager')) {
-	$dest_manager = $destination;
-    } else {
-	my $dest_region = ref $destination && $destination->isa('VM::EC2::Region') 
-	    ? $destination
-	    : $ec2->describe_regions($destination);
-	$dest_region 
-	    or croak "Invalid EC2 Region '$dest_region'; usage VM::EC2::Staging::Manager->copy_image(\$image,\$dest_region)";	
-	my $dest_endpoint = $dest_region->regionEndpoint;
-	my $dest_ec2      = VM::EC2->new(-endpoint    => $dest_endpoint,
-					 -access_key  => $ec2->access_key,
-					 -secret_key  => $ec2->secret) 
-	    or croak "Could not create new VM::EC2 in $dest_region";
-	$dest_manager = $self->new(-ec2           => $dest_ec2,
-				   -scan          => 1,
-				   -on_exit       => 'destroy',
-				   -instance_type => $self->instance_type);
-    }
-
+    my $dest_manager = $self->_parse_destination($destination);
 
     my $root_type = $image->rootDeviceType;
     if ($root_type eq 'ebs') {
@@ -494,9 +482,10 @@ sub copy_snapshot {
 	) or croak "Couldn't create new destination volume for $snapId";
 
     if ($fstype eq 'raw') {
-	$self->info("Using dd for block level disk copy (will take a while).\n");
+	$self->info("Using dd for block level disk copy (will take 1-2 minutes per gigabyte of raw disk).\n");
 	$source->dd($dest)    or croak "dd failed";
     } else {
+	$self->info("Using rsync for file level disk copy (will take 1-2 minutes per gigabyte of storage used).\n");
 	$source->copy($dest) or croak "rsync failed";
     }
     
@@ -523,6 +512,9 @@ sub _copy_ebs_image {
     my $self = shift;
     my ($image,$dest_manager,$options) = @_;
 
+    # apply overrides
+    my %overrides = @$options if $options;
+
     # hashref with keys 'name', 'description','architecture','kernel','ramdisk','block_devices','root_device'
     # 'is_public','authorized_users'
     $self->info("Gathering information about image $image.\n");
@@ -533,15 +525,19 @@ sub _copy_ebs_image {
     my $architecture = $info->{architecture};
     my ($kernel,$ramdisk);
 
-    if ($info->{kernel}) {
+    if ($info->{kernel} && !$overrides{-kernel}) {
+	$self->info("Searching for a suitable kernel in the destination region.\n");
 	$kernel       = $self->_match_kernel($info->{kernel},$dest_manager,'kernel')
 	    or croak "Could not find an equivalent kernel for $info->{kernel} in region ",$dest_manager->ec2->endpoint;
+	$self->info("Matched kernel $kernel\n");
     }
     
-    if ($info->{ramdisk}) {
+    if ($info->{ramdisk} && !$overrides{-ramdisk}) {
+	$self->info("Searching for a suitable ramdisk in the destination region.\n");
 	$ramdisk      = ( $self->_match_kernel($info->{ramdisk},$dest_manager,'ramdisk')
 		       || $dest_manager->_guess_ramdisk($kernel)
 	    )  or croak "Could not find an equivalent ramdisk for $info->{ramdisk} in region ",$dest_manager->ec2->endpoint;
+	$self->info("Matched ramdisk $ramdisk\n");
     }
 
     my $block_devices   = $info->{block_devices};  # format same as $image->blockDeviceMapping
@@ -565,7 +561,7 @@ sub _copy_ebs_image {
     my @mappings;
     for my $source_ebs (@$block_devices) {
 	my $dest        = "$source_ebs";  # interpolates into correct format
-	$dest          =~ s/=([\w-]+)/'='.$dest_snapshots{$1}||$1/e;  # replace source snap with dest snap
+	$dest          =~ s/=([\w-]+)/'='.($dest_snapshots{$1}||$1)/e;  # replace source snap with dest snap
 	push @mappings,$dest;
     }
 
@@ -575,9 +571,6 @@ sub _copy_ebs_image {
 	$name = $self->_token($name);
 	print STDERR "Renamed to '$name'\n";
     }
-
-    # apply overrides
-    my %overrides = @$options if $options;
 
     # merge block device mappings if present
     if (my $m = $overrides{-block_device_mapping}||$overrides{-block_devices}) {
@@ -598,6 +591,7 @@ sub _copy_ebs_image {
 						  -architecture         => $architecture,
 						  $kernel  ? (-kernel_id   => $kernel):  (),
 						  $ramdisk ? (-ramdisk_id  => $ramdisk): (),
+						  %overrides,
 	);
     $img or croak "Could not register image: ",$dest_manager->ec2->error_str;
 
@@ -692,6 +686,7 @@ sub provision_server {
 	-username => $self->username,
 	-instance => $instance,
 	-manager  => $self,
+	-name     => $args{-name},
 	);
     eval {
 	local $SIG{ALRM} = sub {die 'timeout'};
@@ -848,21 +843,46 @@ sub terminate_all_servers {
     $self->_terminate_servers(@servers);
 }
 
+=head2 $manager->force_terminate_all_servers
+
+Force termination of all VM::EC2::Staging::Servers, even if the
+internal registration system indicates that some may be in use by
+other Manager instances.
+
+=cut
+
+sub force_terminate_all_servers {
+    my $self = shift;
+    my $ec2 = $self->ec2 or return;
+    my @servers  = $self->servers or return;
+    $ec2->terminate_instances(@servers) or warn $self->ec2->error_str;
+    $ec2->wait_for_instances(@servers);
+}
+
 sub _terminate_servers {
     my $self = shift;
     my @servers = @_;
     my $ec2 = $self->ec2 or return;
+
+    my @terminate;
+    foreach (@servers) {
+	my $in_use = $self->unregister_server($_);
+	if ($in_use) {
+	    $self->warn("$_ is still in use. Will not terminate.\n");
+	    next;
+	}
+	push @terminate,$_;
+    }
     
-    if (@servers) {
-	$self->info("Terminating servers @servers.\n");
-	$ec2->terminate_instances(@servers) or warn $self->ec2->error_str;
-	$ec2->wait_for_instances(@servers);
+    if (@terminate) {
+	$self->info("Terminating servers @terminate.\n");
+	$ec2->terminate_instances(@terminate) or warn $self->ec2->error_str;
+	$ec2->wait_for_instances(@terminate);
     }
 
     unless ($self->reuse_key) {
 	$ec2->delete_key_pair($_) foreach $ec2->describe_key_pairs(-filter=>{'key-name' => 'staging-key-*'});
     }
-    $self->unregister_server($_) foreach @servers;
 }
 
 =head2 $manager->wait_for_servers(@servers)
@@ -1202,6 +1222,12 @@ sub rsync {
     my $dest_path         = $dest->[1];
 
     my $rsync_args        = $self->_rsync_args;
+    my $dots;
+
+    if ($self->verbosity == VERBOSE_INFO) {
+	$rsync_args       .= 'v';  # print a line for each file
+	$dots             = '2>&1|/tmp/dots.pl t';
+    }
 
     my $src_is_server    = $source_host && UNIVERSAL::isa($source_host,'VM::EC2::Staging::Server');
     my $dest_is_server   = $dest_host   && UNIVERSAL::isa($dest_host,'VM::EC2::Staging::Server');
@@ -1213,7 +1239,8 @@ sub rsync {
     # remote rsync on either src or dest server
     if ($remote_path && ($src_is_server || $dest_is_server)) {
 	my $server = $source_host || $dest_host;
-	return $server->ssh(['-t','-A'],"sudo -E rsync -e 'ssh -o \"CheckHostIP no\" -o \"StrictHostKeyChecking no\"' $rsync_args @source_paths $dest_path");
+	$self->_upload_dots_script($server) if $dots;
+	return $server->ssh(['-t','-A'],"sudo -E rsync -e 'ssh -o \"CheckHostIP no\" -o \"StrictHostKeyChecking no\"' $rsync_args @source_paths $dest_path $dots");
     }
 
     # localhost => localhost
@@ -1248,10 +1275,11 @@ sub rsync {
     my $keyfile  = $source_host->keyfile;
     $ssh_args    =~ s/$keyfile/$keyname/;  # because keyfile is embedded among args
     $self->info("Beginning rsync @source_paths $dest_ip:$dest_path...\n");
+    $self->_upload_dots_script($source_host) if $dots;
     my $result = $source_host->ssh('sudo','rsync',$rsync_args,
 				   '-e',"'ssh $ssh_args'",
 				   "--rsync-path='sudo rsync'",
-				   @source_paths,"$dest_ip:$dest_path");
+				   @source_paths,"$dest_ip:$dest_path",$dots);
     $self->info("...rsync done.\n");
     return $result;
 }
@@ -1285,14 +1313,14 @@ sub dd {
     my $gigs     = $vol1->size;
 
     if ($use_pv) {
-	$self->info('Configuring PV to show dd progress.');
-	$server1->ssh("if [ ! -e /usr/bin/pv ]; then sudo apt-get -qq update; sudo apt-get -y -qq install pv; fi");
+	$self->info("Configuring PV to show dd progress...\n");
+	$server1->ssh("if [ ! -e /usr/bin/pv ]; then sudo apt-get -qq update >/dev/null 2>&1; sudo apt-get -y -qq install pv >/dev/null 2>&1; fi");
     }
 
     if ($server1 eq $server2) {
 	if ($use_pv) {
 	    print STDERR "\n";
-	    $server1->ssh("sudo dd if=$device1 2>/dev/null | pv -f -s ${gigs}G -petr | sudo dd of=$device2 2>/dev/null");
+	    $server1->ssh(['-t'], "sudo dd if=$device1 2>/dev/null | pv -f -s ${gigs}G -petr | sudo dd of=$device2 2>/dev/null");
 	} else {
 	    $server1->ssh("sudo dd if=$device1 of=$device2 $hush");
 	}
@@ -1302,10 +1330,14 @@ sub dd {
 	my $ssh_args = $server1->_ssh_escaped_args;
 	my $keyfile  = $server1->keyfile;
 	$ssh_args    =~ s/$keyfile/$keyname/;  # because keyfile is embedded among args
-	my $pv       = $use_pv ? "| pv -s ${gigs}G -petr" : '';
-	$server1->ssh("sudo dd if=$device1 $hush $pv | gzip -1 - | ssh $ssh_args $dest_ip 'gunzip -1 - | sudo dd of=$device2 $hush'");
+	my $pv       = $use_pv ? "2>/dev/null | pv -s ${gigs}G -petr" : '';
+       $server1->ssh(['-t'], "sudo dd if=$device1 $hush $pv | gzip -1 - | ssh $ssh_args $dest_ip 'gunzip -1 - | sudo dd of=$device2'");
     }
 }
+
+#
+# perl -e 'my $b; while (read(STDIN,$b,65536)
+# 
 
 # take real or symbolic name and turn it into a two element
 # list consisting of server object and mount point
@@ -1349,10 +1381,10 @@ sub _resolve_path {
 sub _rsync_args {
     my $self  = shift;
     my $verbosity = $self->verbosity;
-    return $verbosity < VERBOSE_WARN  ? '-aqz'
-	  :$verbosity < VERBOSE_INFO  ? '-aqz'
+    return $verbosity < VERBOSE_WARN  ? '-azq'
+	  :$verbosity < VERBOSE_INFO  ? '-azh'
 	  :$verbosity < VERBOSE_DEBUG ? '-azh'
-	  : '-avzh'
+	  : '-azhv'
 }
 
 sub _authorize {
@@ -1548,7 +1580,7 @@ is overridden using -verbose at create time.
 
 =cut
 
-sub default_verbosity { 2 }
+sub default_verbosity { VERBOSE_INFO }
 
 =head2 $name = $manager->default_exit_behavior
 
@@ -1561,12 +1593,12 @@ sub default_exit_behavior { 'stop'        }
 
 =head2 $name = $manager->default_image_name
 
-Return the default image name ('ubuntu-maverick-10.10') for use in
+Return the default image name ('ubuntu-precise-12.04') for use in
 creating new instances. Intended to be overridden in subclasses.
 
 =cut
 
-sub default_image_name    { 'ubuntu-maverick-10.10' };  # launches faster than precise
+sub default_image_name    { 'ubuntu-precise-12.04' };  # launches faster than precise
 
 =head2 $name = $manager->default_user_name
 
@@ -1684,9 +1716,11 @@ internally.
 sub register_server {
     my $self   = shift;
     my $server = shift;
+    sleep 1;   # AWS lag bugs
     my $zone   = $server->placement;
     $Zones{$zone}{Servers}{$server} = $server;
     $Instances{$server->instance}   = $server;
+    return $self->_increment_usage_count($server);
 }
 
 =head2 $manager->unregister_server($server)
@@ -1702,6 +1736,7 @@ sub unregister_server {
     my $zone   = eval{$server->placement} or return; # avoids problems at global destruction
     delete $Zones{$zone}{Servers}{$server};
     delete $Instances{$server->instance};
+    return $self->_decrement_usage_count($server);
 }
 
 =head2 $manager->register_volume($volume)
@@ -1714,6 +1749,7 @@ internally.
 sub register_volume {
     my $self = shift;
     my $vol  = shift;
+    $self->_increment_usage_count($vol);
     $Zones{$vol->availabilityZone}{Volumes}{$vol} = $vol;
     $Volumes{$vol->volumeId} = $vol;
 }
@@ -1729,6 +1765,7 @@ sub unregister_volume {
     my $self = shift;
     my $vol  = shift;
     my $zone = $vol->availabilityZone;
+    $self->_decrement_usage_count($vol);
     delete $Zones{$zone}{$vol};
     delete $Volumes{$vol->volumeId};
 }
@@ -2028,6 +2065,42 @@ sub _gather_image_info {
     };
 }
 
+sub _parse_destination {
+    my $self        = shift;
+    my $destination = shift;
+
+    my $ec2         = $self->ec2;
+    my $dest_manager;
+    if (ref $destination && $destination->isa('VM::EC2::Staging::Manager')) {
+	$dest_manager = $destination;
+    } else {
+	my $dest_region = ref $destination && $destination->isa('VM::EC2::Region') 
+	    ? $destination
+	    : $ec2->describe_regions($destination);
+	$dest_region 
+	    or croak "Invalid EC2 Region '$dest_region'; usage VM::EC2::Staging::Manager->copy_image(\$image,\$dest_region)";
+	my $dest_endpoint = $dest_region->regionEndpoint;
+	my $dest_ec2      = VM::EC2->new(-endpoint    => $dest_endpoint,
+					 -access_key  => $ec2->access_key,
+					 -secret_key  => $ec2->secret) 
+	    or croak "Could not create new VM::EC2 in $dest_region";
+
+	$dest_manager = $self->new(-ec2           => $dest_ec2,
+				   -scan          => $self->scan,
+				   -on_exit       => 'destroy',
+				   -instance_type => $self->instance_type);
+    }
+
+    return $dest_manager;
+}
+
+sub match_kernel {
+    my $self = shift;
+    my ($src_kernel,$dest) = @_;
+    my $dest_manager = $self->_parse_destination($dest) or croak "could not create destination manager for $dest";
+    return $self->_match_kernel($src_kernel,$dest_manager,'kernel');
+}
+
 sub _match_kernel {
     my $self = shift;
     my ($imageId,$dest_manager) = @_;
@@ -2049,6 +2122,22 @@ sub _match_kernel {
 	@candidates  = $dest_ec2->describe_images(-filter=>{'image-type'=>'kernel',
 							    'manifest-location'=>"*/$location"},
 						  -executable_by=>['all','self']);
+    }
+    unless (@candidates) { # go to approximate match
+	my $location = $image->imageLocation;
+	my @path     = split '/',$location;
+	my @kernels = $dest_ec2->describe_images(-filter=>{'image-type'=>'kernel',
+							   'manifest-location'=>"*/*"},
+						 -executable_by=>['all','self']);
+	my %k         = map {$_=>$_} @kernels;
+	my %locations = map {my $l    = $_->imageLocation;
+			     my @path = split '/',$l;
+			     $_       => \@path} @kernels;
+
+	my %level0          = map {$_ => abs(adistr($path[0],$locations{$_}[0]))} keys %locations;
+	my %level1          = map {$_ => abs(adistr($path[1],$locations{$_}[1]))} keys %locations;
+	@candidates         = sort {$level0{$a}<=>$level0{$b} || $level1{$a}<=>$level1{$b}} keys %locations;
+	@candidates         = map {$k{$_}} @candidates;
     }
     return $candidates[0];
 }
@@ -2125,6 +2214,124 @@ sub _servers {
     my @servers   = values %Instances;
     return @servers unless $endpoint;
     return grep {$_->ec2->endpoint eq $endpoint} @servers;
+}
+
+sub _lock {
+    my $self      = shift;
+    my ($resource,$lock_type)  = @_;
+    $lock_type eq 'SHARED' || $lock_type eq 'EXCLUSIVE'
+	or croak "Usage: _lock(\$resource,'SHARED'|'EXCLUSIVE')";
+
+    $resource->refresh;
+    my $tags = $resource->tags;
+    if (my $value = $tags->{StagingLock}) {
+	my ($type,$pid) = split /\s+/,$value;
+
+	if ($pid eq $$) {  # we've already got lock
+	    $resource->add_tags(StagingLock=>"$lock_type $$")
+		unless $type eq $lock_type;
+	    return 1;
+	}
+	
+	if ($lock_type eq 'SHARED' && $type eq 'SHARED') {
+	    return 1;
+	}
+
+	# wait for lock
+	eval {
+	    local $SIG{ALRM} = sub {die 'timeout'};
+	    alarm(LOCK_TIMEOUT);  # we get lock eventually one way or another
+	    while (1) {
+		$resource->refresh;
+		last unless $resource->tags->{StagingLock};
+		sleep 1;
+	    }
+	};
+	alarm(0);
+    }
+    $resource->add_tags(StagingLock=>"$lock_type $$");
+    return 1;
+}
+
+sub _unlock {
+    my $self     = shift;
+    my $resource = shift;
+    $resource->refresh;
+    my ($type,$pid) = split /\s+/,$resource->tags->{StagingLock};
+    return unless $pid eq $$;
+    $resource->delete_tags('StagingLock');
+}
+
+sub _safe_update_tag {
+    my $self = shift;
+    my ($resource,$tag,$value) = @_;
+    $self->_lock($resource,'EXCLUSIVE');
+    $resource->add_tag($tag => $value);
+    $self->_unlock($resource);
+}
+
+sub _safe_read_tag {
+    my $self = shift;
+    my ($resource,$tag) = @_;
+    $self->_lock($resource,'SHARED');
+    my $value = $resource->tags->{$tag};
+    $self->_unlock($resource);
+    return $value;
+}
+
+
+sub _increment_usage_count {
+    my $self     = shift;
+    my $resource = shift;
+    $self->_lock($resource,'EXCLUSIVE');
+    my $in_use = $resource->tags->{'StagingInUse'} || 0;
+    $resource->add_tags(StagingInUse=>$in_use+1);
+    $self->_unlock($resource);
+    $in_use+1;
+}
+
+sub _decrement_usage_count {
+    my $self     = shift;
+    my $resource = shift;
+
+    $self->_lock($resource,'EXCLUSIVE');
+    my $in_use = $resource->tags->{'StagingInUse'} || 0;
+    $in_use--;
+    if ($in_use > 0) {
+	$resource->add_tags(StagingInUse=>$in_use);
+    } else {
+	$resource->delete_tags('StagingInUse');
+	$in_use = 0;
+    }
+    $self->_unlock($resource);
+    return $in_use;
+}
+
+sub _upload_dots_script {
+    my $self   = shift;
+    my $server = shift;
+
+    my @lines       = split "\n",longmess();
+    my $stack_count = grep /VM::EC2::Staging::Manager/,@lines;
+    my $spaces      = ' ' x (($stack_count-1)*3);
+
+    my $fh     = $server->scmd_write('cat >/tmp/dots.pl');
+    print $fh <<END;
+#!/usr/bin/perl
+my \$mode = shift || 'b';
+print STDERR "[info] ${spaces}One dot equals ",(\$mode eq 'b'?'100 Mb':'100 files'),': ';
+my \$b; 
+ READ:
+    while (1) { 
+	do {read(STDIN,\$b,1e5) || last READ for 1..1000} if \$mode eq 'b';
+	do {<> || last READ                  for 1.. 100} if \$mode eq 't';
+	print STDERR '.';
+}
+print STDERR ".\n";
+END
+    ;
+    close $fh;
+    $server->ssh('chmod +x /tmp/dots.pl');
 }
 
 sub DESTROY {

@@ -135,7 +135,7 @@ VM::EC2 - Control the Amazon EC2 and Eucalyptus Clouds
 
 =head1 DESCRIPTION
 
-This is an interface to the 2012-07-20 version of the Amazon AWS API
+This is an interface to the 2012-10-01 version of the Amazon AWS API
 (http://aws.amazon.com/ec2). It was written provide access to the new
 tag and metadata interface that is not currently supported by
 Net::Amazon::EC2, as well as to provide developers with an extension
@@ -375,7 +375,7 @@ use VM::EC2::Dispatch;
 use VM::EC2::Error;
 use Carp 'croak','carp';
 
-our $VERSION = '1.19';
+our $VERSION = '1.20';
 our $AUTOLOAD;
 our @CARP_NOT = qw(VM::EC2::Image    VM::EC2::Volume
                    VM::EC2::Snapshot VM::EC2::Instance
@@ -997,7 +997,7 @@ following:
          - '<volume-type>': The volume type. One of "standard" or "io1".
 
          - '<iops>': The number of I/O operations per second (IOPS) that
-           the volume suports. A number between 1 to 1000. Only valid
+           the volume suports. A number between 100 to 2000. Only valid
            for volumes of type "io1".
           
          Examples: -block_devices => '/dev/sdb=snap-7eb96d16'
@@ -2107,7 +2107,7 @@ Optional Arguments:
                           standard
 
  -iops                 -- The number of I/O operations per second (IOPS) that
-                          the volume supports.  Range is 1 to 1000.  Required
+                          the volume supports.  Range is 100 to 2000.  Required
                           when volume type is io1.
 
 The returned object is a VM::EC2::Volume object.
@@ -3245,7 +3245,7 @@ into the requested bucket, and prefixed with the desired prefix.
 
 If no prefix is specified, it defaults to "SPOT_DATAFEED_";
 
-On success, a VM::EC2::Spot:DatafeedSubscription object is returned;
+On success, a VM::EC2::Spot::DatafeedSubscription object is returned;
 
 Only one datafeed is allowed per account;
 
@@ -3280,7 +3280,7 @@ sub delete_spot_datafeed_subscription {
 This method describes the current account's spot datafeed
 subscription, if any. It takes no arguments.
 
-On success, a VM::EC2::Spot:DatafeedSubscription object is returned;
+On success, a VM::EC2::Spot::DatafeedSubscription object is returned;
 
 =cut
 
@@ -3569,6 +3569,7 @@ http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/index.html?ApiRefer
     launch.block-device-mapping.device-name
     launch.block-device-mapping.snapshot-id
     launch.block-device-mapping.volume-size
+    launch.block-device-mapping.volume-type
     launch.group-id
     launch.image-id
     launch.instance-type
@@ -3576,10 +3577,21 @@ http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/index.html?ApiRefer
     launch.key-name
     launch.monitoring-enabled
     launch.ramdisk-id
+    launch.network-interface.network-interface-id
+    launch.network-interface.device-index
+    launch.network-interface.subnet-id
+    launch.network-interface.description
+    launch.network-interface.private-ip-address
+    launch.network-interface.delete-on-termination
+    launch.network-interface.group-id
+    launch.network-interface.group-name
+    launch.network-interface.addresses.primary
     product-description
     spot-instance-request-id
     spot-price
     state
+    status-code
+    status-message
     tag-key
     tag-value
     tag:<key>
@@ -7046,7 +7058,7 @@ API version.
 
 sub version  { 
     my $self = shift;
-    return $self->{version} ||=  '2012-08-15';
+    return $self->{version} ||=  '2012-10-01';
 }
 
 =head2 $ts = $ec2->timestamp
@@ -7194,7 +7206,7 @@ sub args {
 
 =head1 MISSING METHODS
 
-As of 17 Sept 2012, the following Amazon API calls were NOT
+As of 20 Oct 2012, the following Amazon API calls were NOT
 implemented. Volunteers to implement these calls are most welcome.
 
 BundleInstance

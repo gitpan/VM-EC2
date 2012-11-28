@@ -25,6 +25,7 @@
             "File::Path" : "2.08",
             "LWP" : "5.835",
             "MIME::Base64" : "3.08",
+            "String::Approx" : "3.26",
             "URI::URL" : "5.03",
             "XML::Simple" : "2.18"
          }
@@ -33,7 +34,7 @@
    "provides" : {
       "VM::EC2" : {
          "file" : "lib/VM/EC2.pm",
-         "version" : "1.19"
+         "version" : "1.20"
       },
       "VM::EC2::AvailabilityZone" : {
          "file" : "lib/VM/EC2/AvailabilityZone.pm",
@@ -287,6 +288,10 @@
          "file" : "lib/VM/EC2/Spot/PriceHistory.pm",
          "version" : 0
       },
+      "VM::EC2::Spot::Status" : {
+         "file" : "lib/VM/EC2/Spot/Status.pm",
+         "version" : 0
+      },
       "VM::EC2::Staging::Manager" : {
          "file" : "lib/VM/EC2/Staging/Manager.pm",
          "version" : 0
@@ -402,5 +407,5 @@
          "http://dev.perl.org/licenses/"
       ]
    },
-   "version" : "1.19"
+   "version" : "1.20"
 }
