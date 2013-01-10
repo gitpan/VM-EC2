@@ -88,6 +88,8 @@ These object methods are supported:
                    as a string is equal to the instance's
                    availability zone.
 
+ availabilityZone -- Same as placement.
+
  kernelId       -- ID of the instance's kernel. CHANGEABLE.
 
  ramdiskId      -- ID of the instance's RAM disk. CHANGEABLE.
@@ -560,6 +562,8 @@ sub placement {
     return VM::EC2::Instance::Placement->new($p,$self->aws,$self->xmlns,$self->requestId);
 }
 
+sub availabilityZone { shift->placement }
+
 sub monitoring {
     my $self = shift;
     if (@_) {
@@ -766,6 +770,7 @@ sub disassociate_address {
 sub refresh {
     my $self = shift;
     my $i   = shift;
+    local $self->aws->{raise_error} = 1;
     ($i) = $self->aws->describe_instances(-instance_id=>$self->instanceId) unless $i;
     %$self  = %$i;
 }

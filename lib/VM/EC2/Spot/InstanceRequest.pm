@@ -75,6 +75,13 @@ object.
 
 =head2 $state  = $request->current_status
 
+Refreshes the request information and returns its status as a
+VM::EC2::Spot::Status.  This will string interpolate as the status
+code, such as "fulfilled". You may also call its object methods to
+get the time of the last update and full message.
+
+=head2 $state  = $request->current_state
+
 Refreshes the request information and returns its state, such as "open".
 
 =head2 $request->refresh
@@ -145,11 +152,18 @@ sub fault {
 
 sub refresh {
     my $self = shift;
+    local $self->ec2->{raise_error} = 1;
     my $r    = $self->ec2->describe_spot_instance_requests($self->spotInstanceRequestId);
     %$self   = %$r;
 }
 
 sub current_status {
+    my $self = shift;
+    $self->refresh;
+    return $self->status;
+}
+
+sub current_state {
     my $self = shift;
     $self->refresh;
     return $self->state;

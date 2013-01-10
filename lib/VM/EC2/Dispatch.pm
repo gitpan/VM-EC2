@@ -139,6 +139,7 @@ use constant ObjectRegistration => {
     DetachVolume      => 'VM::EC2::BlockDevice::Attachment',
     CreateSnapshot    => 'VM::EC2::Snapshot',
     DeleteSnapshot    => 'boolean',
+    CopySnapshot      => sub { shift->{snapshotId} },
     ModifySnapshotAttribute => 'boolean',
     ResetSnapshotAttribute  => 'boolean',
     ModifyInstanceAttribute => 'boolean',
@@ -197,6 +198,10 @@ use constant ObjectRegistration => {
     DescribeSpotInstanceRequests      => 'fetch_items,spotInstanceRequestSet,VM::EC2::Spot::InstanceRequest',
     GetFederationToken                => 'fetch_one,GetFederationTokenResult,VM::EC2::Security::Token',
     GetSessionToken                   => 'fetch_one,GetSessionTokenResult,VM::EC2::Security::Token',
+    # placement groups
+    DescribePlacementGroups           => 'fetch_items,placementGroupSet,VM::EC2::PlacementGroup',
+    CreatePlacementGroup              => 'boolean',
+    DeletePlacementGroup              => 'boolean',
     # vpcs
     CreateVpc                         => 'fetch_one,vpc,VM::EC2::VPC',
     DescribeVpcs                      => 'fetch_items,vpcSet,VM::EC2::VPC',
@@ -287,6 +292,9 @@ use constant ObjectRegistration => {
     AttachLoadBalancerToSubnets       => 'elb_member_list,Subnets',
     DetachLoadBalancerFromSubnets     => 'elb_member_list,Subnets',
     SetLoadBalancerPoliciesForBackendServer => sub { exists shift->{SetLoadBalancerPoliciesForBackendServerResult} },
+    # auto scaling and launch controls
+    DescribeLaunchConfigurations      => 'fetch_members,LaunchConfigurations,VM::EC2::LaunchConfiguration',
+    DescribeAutoScalingGroups         => 'fetch_members,AutoScalingGroups,VM::EC2::ASG',
 };
 
 sub new {
@@ -570,10 +578,14 @@ sub create_objects {
 
 sub create_error_object {
     my $self = shift;
-    my ($content,$ec2) = @_;
+    my ($content,$ec2,$API_call) = @_;
     my $class   = ObjectRegistration->{Error};
     eval "require $class; 1" || die $@ unless $class->can('new');
     my $parsed = $self->new_xml_parser->XMLin($content);
+    if (defined $API_call) {
+	$parsed->{Errors}{Error}{Message} =~ s/\.$//;
+	$parsed->{Errors}{Error}{Message} .= " from API call '$API_call'";
+    }
     return $class->new($parsed->{Errors}{Error},$ec2,@{$parsed}{'xmlns','requestId'});
 }
 

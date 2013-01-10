@@ -135,7 +135,7 @@ VM::EC2 - Control the Amazon EC2 and Eucalyptus Clouds
 
 =head1 DESCRIPTION
 
-This is an interface to the 2012-10-01 version of the Amazon AWS API
+This is an interface to the 2012-12-01 version of the Amazon AWS API
 (http://aws.amazon.com/ec2). It was written provide access to the new
 tag and metadata interface that is not currently supported by
 Net::Amazon::EC2, as well as to provide developers with an extension
@@ -375,7 +375,7 @@ use VM::EC2::Dispatch;
 use VM::EC2::Error;
 use Carp 'croak','carp';
 
-our $VERSION = '1.20';
+our $VERSION = '1.22';
 our $AUTOLOAD;
 our @CARP_NOT = qw(VM::EC2::Image    VM::EC2::Volume
                    VM::EC2::Snapshot VM::EC2::Instance
@@ -467,9 +467,9 @@ sub new {
 
     my ($id,$secret,$token);
     if (ref $args{-security_token} && $args{-security_token}->can('access_key_id')) {
-	$id     = $args{-security_token}->access_key_id;
-	$secret = $args{-security_token}->secret_access_key;
-	$token  = $args{-security_token}->session_token;
+	$id     = $args{-security_token}->accessKeyId;
+	$secret = $args{-security_token}->secretAccessKey;
+	$token  = $args{-security_token}->sessionToken;
     }
 
     $id           ||= $args{-access_key} || $ENV{EC2_ACCESS_KEY}
@@ -495,8 +495,9 @@ sub new {
     },ref $self || $self;
 
     if ($args{-region}) {
-	my $region = $obj->describe_regions($args{-region}) or croak $obj->error_str;
-	$obj->endpoint($region->regionEndpoint);
+	my $region   = eval{$obj->describe_regions($args{-region})};
+	my $endpoint = $region ? $region->regionEndpoint :"ec2.$args{-region}.amazonaws.com";
+	$obj->endpoint($endpoint);
     }
 
     return $obj;
@@ -703,6 +704,23 @@ sub account_id {
 }
 
 sub userId { shift->account_id }
+
+=head2 $new_ec2 = $ec2->clone
+
+This method creates an identical copy of the EC2 object. It is used
+occasionally internally for creating an EC2 object in a different AWS
+region:
+
+ $singapore = $ec2->clone;
+ $singapore->region('ap-souteast-1');
+
+=cut
+
+sub clone {
+    my $self = shift;
+    my %contents = %$self;
+    return bless \%contents,ref $self;
+}
 
 =head1 EC2 REGIONS AND AVAILABILITY ZONES
 
@@ -1129,7 +1147,7 @@ sub run_instances {
     $args{-availability_zone} ||= $args{-placement_zone};
 
     my @p = map {$self->single_parm($_,\%args) }
-       qw(ImageId MinCount MaxCount KeyName KernelId RamdiskId PrivateIPAddress
+       qw(ImageId MinCount MaxCount KeyName KernelId RamdiskId PrivateIpAddress
           InstanceInitiatedShutdownBehavior ClientToken SubnetId InstanceType);
     push @p,map {$self->list_parm($_,\%args)} qw(SecurityGroup SecurityGroupId);
     push @p,('UserData' =>encode_base64($args{-user_data},''))        if $args{-user_data};
@@ -1887,7 +1905,7 @@ Common optional arguments:
 
  -description         Description of the AMI
  -architecture        Architecture of the image ("i386" or "x86_64")
- -kernel_id           ID fo the kernel to use
+ -kernel_id           ID of the kernel to use
  -ramdisk_id          ID of the RAM disk to use
  
 While you do not have to specify the kernel ID, it is strongly
@@ -2528,6 +2546,40 @@ sub delete_snapshot {
     my %args = $self->args('-snapshot_id',@_);
     my @params   = $self->single_parm('SnapshotId',\%args);
     return $self->call('DeleteSnapshot',@params);
+}
+
+=head2 $snapshot = $ec2->copy_snapshot(-source_region=>$region,-source_snapshot_id=>$id,-description=>$desc)
+
+Copies an existing snapshot within the same region or from one region to another.
+
+Required arguments:
+ -region       -- The region the existing snapshot to copy resides in
+ -snapshot_id  -- The snapshot ID of the snapshot to copy
+
+Optional arguments:
+ -description  -- A description of the new snapshot
+
+The return value is a VM::EC2::Snapshot object that can be queried
+through its current_status() interface to follow the progress of the
+snapshot operation.
+
+=cut
+
+sub copy_snapshot {
+    my $self = shift;
+    my %args = @_;
+    $args{-description} ||= $args{-desc};
+    $args{-source_region} ||= $args{-region};
+    $args{-source_snapshot_id} ||= $args{-snapshot_id};
+    $args{-source_region} or croak "copy_snapshot(): -source_region argument required";
+    $args{-source_snapshot_id} or croak "copy_snapshot(): -source_snapshot_id argument required";
+    # As of 2012-12-22, sourceRegion, sourceSnapshotId are not recognized even though API docs specify those as the parameters
+    # The initial 's' must be capitalized.  This has been reported to AWS as an inconsistency in the docs and API.
+    my @params  = $self->single_parm('SourceRegion',\%args);
+    push @params, $self->single_parm('SourceSnapshotId',\%args);
+    push @params, $self->single_parm('Description',\%args);
+    my $snap_id = $self->call('CopySnapshot',@params);
+    return $snap_id && $self->describe_snapshots($snap_id);
 }
 
 =head1 SECURITY GROUPS AND KEY PAIRS
@@ -3609,6 +3661,92 @@ sub describe_spot_instance_requests {
     my @params = $self->list_parm('SpotInstanceRequestId',\%args);
     push @params,$self->filter_parm(\%args);
     return $self->call('DescribeSpotInstanceRequests',@params);
+}
+
+=head1 PLACEMENT GROUPS
+
+Placement groups Provide low latency and high-bandwidth connectivity
+between cluster instances within a single Availability Zone. Create
+a placement group and then launch cluster instances into it. Instances
+launched within a placement group participate in a full-bisection
+bandwidth cluster appropriate for HPC applications.
+
+=head2 @groups = $ec2->describe_placement_groups(@group_names)
+
+=head2 @groups = $ec2->describe_placement_groups(\%filters)
+
+=head2 @groups = $ec2->describe_placement_groups(-group_name=>\@ids,-filter=>\%filters)
+
+This method will return information about cluster placement groups
+as a list of VM::EC2::PlacementGroup objects.
+
+Optional arguments:
+
+ -group_name         -- Scalar or arrayref of placement group names.
+
+ -filter             -- Tags and other filters to apply.
+
+The filters available are described fully at:
+http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribePlacementGroups.html
+
+    group-name
+    state
+    strategy
+
+=cut
+
+sub describe_placement_groups {
+    my $self = shift;
+    my %args = $self->args('-group_name',@_);
+    my @params = $self->list_parm('GroupName',\%args);
+    push @params,$self->filter_parm(\%args);
+    return $self->call('DescribePlacementGroups',@params);
+}
+
+=head2 $success = $ec2->create_placement_group($group_name)
+
+=head2 $success = $ec2->create_placement_group(-group_name=>$name,-strategy=>$strategy)
+
+Creates a placement group that cluster instances are launched into.
+
+Required arguments:
+ -group_name          -- The name of the placement group to create
+
+Optional:
+ -strategy            -- As of 2012-12-23, the only available option is 'cluster'
+                         so the parameter defaults to that.
+
+Returns true on success.
+
+=cut
+
+sub create_placement_group {
+    my $self = shift;
+    my %args = $self->args('-group_name',@_);
+    $args{-strategy} ||= 'cluster';
+    my @params  = $self->single_parm('GroupName',\%args);
+    push @params, $self->single_parm('Strategy',\%args);
+    return $self->call('CreatePlacementGroup',@params);
+}
+
+=head2 $success = $ec2->delete_placement_group($group_name)
+
+=head2 $success = $ec2->delete_placement_group(-group_name=>$group_name)
+
+Deletes a placement group from the account.
+
+Required arguments:
+ -group_name          -- The name of the placement group to delete
+
+Returns true on success.
+
+=cut
+
+sub delete_placement_group {
+    my $self = shift;
+    my %args = $self->args('-group_name',@_);
+    my @params  = $self->single_parm('GroupName',\%args);
+    return $self->call('DeletePlacementGroup',@params);
 }
 
 =head1 VIRTUAL PRIVATE CLOUDS
@@ -6712,6 +6850,283 @@ sub get_session_token {
     return $self->sts_call('GetSessionToken',@p);
 }
 
+=head1 LAUNCH CONFIGURATIONS
+
+=head2 @lc = $ec2->describe_launch_configurations(-names => \@names);
+
+=head2 @lc = $ec->describe_launch_configurations(@names);
+
+Provides detailed information for the specified launch configuration(s).
+
+Optional parameters are:
+
+  -launch_configuration_names   Name of the Launch config.
+                                  This can be a string scalar or an arrayref.
+
+  -name  Alias for -launch_configuration_names
+
+Returns a series of L<VM::EC2::LaunchConfiguration> objects.
+
+=cut
+
+sub describe_launch_configurations {
+    my $self = shift;
+    my %args = $self->args('-launch_configuration_names',@_);
+    $args{-launch_configuration_names} ||= $args{-names};
+    my @params = $self->list_parm('LaunchConfigurationNames',\%args);
+    return $self->asg_call('DescribeLaunchConfigurations', @params);
+}
+
+=head2 $success = $ec2->create_launch_configuration(%args);
+
+Creates a new launch configuration.
+
+Required arguments:
+
+  -name           -- scalar, name for the Launch config.
+  -image_id       -- scalar, AMI id which this launch config will use
+  -instance_type  -- scalar, instance type of the Amazon EC2 instance.
+
+Optional arguments:
+
+  -block_device_mappings  -- list of hashref
+  -ebs_optimized          -- scalar (boolean). false by default
+  -iam_instance_profile   -- scalar
+  -instance_monitoring    -- scalar (boolean). true by default
+  -kernel_id              -- scalar
+  -key_name               -- scalar
+  -ramdisk                -- scalar
+  -security_groups        -- list of scalars
+  -spot_price             -- scalar
+  -user_data              -- scalar
+
+Returns true on successful execution.
+
+=cut
+
+sub create_launch_configuration {
+    my $self = shift;
+    my %args = @_;
+    my $name = $args{-name} or croak "-name argument is required";
+    my $imageid = $args{-image_id} or croak "-image_id argument is required";
+    my $itype = $args{-instance_type} or croak "-instance_type argument is required";
+
+    my @params = (ImageId => $imageid, InstanceType => $itype, LaunchConfigurationName => $name);
+    push @params, $self->member_list_parm('BlockDeviceMappings',\%args);
+    push @params, $self->member_list_parm('SecurityGroups',\%args);
+    push @params, $self->boolean_parm('EbsOptimized', \%args);
+    push @params, ('UserData' =>encode_base64($args{-user_data},'')) if $args{-user_data};
+    push @params, ('InstanceMonitoring.Enabled' => 'false')
+        if (exists $args{-instance_monitoring} and not $args{-instance_monitoring});
+
+    my @p = map {$self->single_parm($_,\%args) }
+       qw(IamInstanceProfile KernelId KeyName RamdiskId SpotPrice);
+    push @params, @p;
+
+    return $self->asg_call('CreateLaunchConfiguration',@params);
+}
+
+=head2 $success = $ec2->delete_launch_configuration(-name => $name);
+
+Deletes a launch config.
+
+  -name     Required. Name of the launch config to delete
+
+Returns true on success.
+
+=cut
+
+sub delete_launch_configuration {
+    my $self = shift;
+    my %args  = @_;
+    my $name = $args{-name} or croak "-name argument is required";
+    my @params = (LaunchConfigurationName => $name);
+    return $self->asg_call('DeleteLaunchConfiguration', @params);
+}
+
+=head1 AUTOSCALING GROUPS
+
+=head2 @asg = $ec2->describe_autoscaling_groups(-auto_scaling_group_names => \@names);
+
+Returns information about autoscaling groups
+
+  -auto_scaling_group_names     List of auto scaling groups to describe
+  -names                        Alias of -auto_scaling_group_names
+
+Returns a list of L<VM::EC2::ASG>.
+
+=cut
+
+sub describe_autoscaling_groups {
+    my ($self, %args) = @_;
+    $args{-auto_scaling_group_names} ||= $args{-names};
+    my @params = $self->member_list_parm('AutoScalingGroupNames',\%args);
+    return $self->asg_call('DescribeAutoScalingGroups', @params);
+}
+
+=head2 $success = $ec2->create_autoscaling_group(-name => $name, 
+                                                -launch_config => $lc,
+                                                -max_size => $max_size,
+                                                -min_size => $min_size);
+
+Creates a new autoscaling group.
+
+Required arguments:
+
+  -name             Name for the autoscaling group
+  -launch_config    Name of the launch configuration to be used
+  -max_size         Max number of instances to be run at once
+  -min_size         Min number of instances
+
+Optional arguments:
+
+  -availability_zones   List of availability zone names
+  -load_balancer_names  List of ELB names
+  -tags                 List of tags to apply to the instances run
+  -termination_policies List of policy names
+  -default_cooldown     Time in seconds between autoscaling activities
+  -desired_capacity     Number of instances to be run after creation
+  -health_check_type    One of "ELB" or "EC2"
+  -health_check_grace_period    Mandatory for health check type ELB. Number of
+                                seconds between an instance is started and the
+                                autoscaling group starts checking its health
+  -placement_group      Physical location of your cluster placement group
+  -vpc_zone_identifier  Strinc containing a comma-separated list of subnet 
+                        identifiers
+
+Returns true on success.
+
+=cut
+
+sub create_autoscaling_group {
+    my $self = shift;
+    my %args = @_;
+    my $name = $args{-name} or croak "-name argument is required";
+    my $lconfig = $args{-launch_config} or croak "-launch_config argument is required";
+    my $max = $args{-max_size};
+    croak "-max_size argument is required" if (not defined $max);
+    my $min = $args{-min_size};
+    croak "-min_size argument is required" if (not defined $min);
+
+    my @params = (AutoScalingGroupName => $name, LaunchConfigurationName => $lconfig, MaxSize => $max,
+                  MinSize => $max);
+    push @params, $self->member_list_parm('AvailabilityZones',\%args);
+    push @params, $self->member_list_parm('LoadBalancerNames',\%args);
+    push @params, $self->member_list_parm('TerminationPolicies',\%args);
+    push @params, $self->autoscaling_tags('Tags', \%args);
+
+    my @p = map {$self->single_parm($_,\%args) }
+       qw( DefaultCooldown DesiredCapacity HealthCheckGracePeriod HealthCheckType PlacementGroup
+           VPCZoneIdentifier);
+    push @params, @p;
+
+    return $self->asg_call('CreateAutoScalingGroup',@params);
+}
+
+=head2 $success = $ec2->delete_autoscaling_group(-name => $name)
+
+Deletes an autoscaling group.
+
+  -name     Name of the autoscaling group to delete
+
+Returns true on success.
+
+=cut
+
+sub delete_autoscaling_group {
+    my $self = shift;
+    my %args  = @_;
+    my $name = $args{-name} or croak "-name argument is required";
+    my @params = (AutoScalingGroupName => $name);
+    push @params, $self->single_parm('ForceDelete',\%args);
+    return $self->asg_call('DeleteAutoScalingGroup', @params);
+}
+
+=head2 $success = $ec2->update_autoscaling_group(-name => $name);
+
+Updates an autoscaling group. Only required parameter is C<-name>
+
+Optional arguments:
+
+  -availability_zones       List of AZ's
+  -termination_policies     List of policy names
+  -default_cooldown
+  -desired_capacity
+  -health_check_type
+  -health_check_grace_period
+  -placement_group
+  -vpc_zone_identifier
+  -max_size
+  -min_size
+
+Returns true on success;
+
+=cut
+
+sub update_autoscaling_group {
+    my $self = shift;
+    my %args = @_;
+
+    my $name = $args{-name} or croak "-name argument is required";
+    my @params = (AutoScalingGroupName => $name);
+
+    push @params, $self->member_list_parm('AvailabilityZones',\%args);
+    push @params, $self->member_list_parm('TerminationPolicies',\%args);
+
+    my @p = map {$self->single_parm($_,\%args) }
+       qw( DefaultCooldown DesiredCapacity HealthCheckGracePeriod
+           HealthCheckType PlacementGroup VPCZoneIdentifier MaxSize MinSize );
+    push @params, @p;
+
+    return $self->asg_call('UpdateAutoScalingGroup',@params);
+}
+
+=head2 $success = $ec2->suspend_processes(-name => $asg_name,
+                                          -scaling_processes => \@procs);
+
+Suspend the requested autoscaling processes.
+
+  -name                 Name of the autoscaling group
+  -scaling_processes    List of process names to suspend. Valid processes are:
+        Launch
+        Terminate
+        HealthCheck
+        ReplaceUnhealty
+        AZRebalance
+        AlarmNotification
+        ScheduledActions
+        AddToLoadBalancer
+
+Returns true on success.
+
+=cut
+
+sub suspend_processes {
+    my ($self, %args) = @_;
+    my $name = $args{-name} or croak "-name argument is required";
+    my @params = (AutoScalingGroupName => $name);
+    push @params, $self->member_list_parm('ScalingProcesses', \%args);
+    return $self->asg_call('SuspendProcesses', @params);
+}
+
+=head2 $success = $ec2->resume_processes(-name => $asg_name,
+                                         -scaling_processes => \@procs);
+
+Resumes the requested autoscaling processes. It accepts the same arguments than
+C<suspend_processes>.
+
+Returns true on success.
+
+=cut
+
+sub resume_processes {
+    my ($self, %args) = @_;
+    my $name = $args{-name} or croak "-name argument is required";
+    my @params = (AutoScalingGroupName => $name);
+    push @params, $self->member_list_parm('ScalingProcesses', \%args);
+    return $self->asg_call('ResumeProcesses', @params);
+}
+
 # ------------------------------------------------------------------------------------------
 
 =head1 INTERNAL METHODS
@@ -6832,6 +7247,29 @@ sub list_parm {
 	for (ref $a && ref $a eq 'ARRAY' ? @$a : $a) {
 	    push @params,("$argname.".$c++ => $_);
 	}
+    }
+
+    return @params;
+}
+
+=head2 @arguments = $ec2->autoscaling_tags($argname, \%args)
+
+=cut
+
+sub autoscaling_tags {
+    my $self = shift;
+    my ($argname, $args) = @_;
+
+    my $name = $self->canonicalize($argname);
+    my @params;
+    if (my $a = $args->{$name}||$args->{"-$argname"}) {
+        my $c = 1;
+        for my $tag (ref $a && ref $a eq 'ARRAY' ? @$a : $a) {
+            my $prefix = "$argname.member." . $c++;
+            while (my ($k, $v) = each %$tag) {
+                push @params, ("$prefix.$k" => $v);
+            }
+        }
     }
 
     return @params;
@@ -6982,8 +7420,15 @@ sub block_device_parm {
 	    push @p,("BlockDeviceMapping.$c.VirtualName"=>$blockdevice);
 	} else {
 	    my ($snapshot,$size,$delete_on_term,$vtype,$iops) = split ':',$blockdevice;
-	    push @p,("BlockDeviceMapping.$c.Ebs.SnapshotId" =>$snapshot)               if $snapshot;
-	    push @p,("BlockDeviceMapping.$c.Ebs.VolumeSize" =>$size)                   if $size;
+
+	    # Workaround for apparent bug in 2012-12-01 API; instances will crash without volume size
+	    # even if a snapshot ID is provided
+	    if ($snapshot) {
+		$size ||= eval{$self->describe_snapshots($snapshot)->volumeSize};
+		push @p,("BlockDeviceMapping.$c.Ebs.SnapshotId" =>$snapshot);
+	    }
+
+	    push @p,("BlockDeviceMapping.$c.Ebs.VolumeSize" =>$size)                    if $size;
 	    push @p,("BlockDeviceMapping.$c.Ebs.DeleteOnTermination"=>$delete_on_term) 
 		if defined $delete_on_term  && $delete_on_term=~/^(true|false|1|0)$/;
 	    push @p,("BlockDeviceMapping.$c.Ebs.VolumeType"=>$vtype)                    if $vtype;
@@ -7058,7 +7503,7 @@ API version.
 
 sub version  { 
     my $self = shift;
-    return $self->{version} ||=  '2012-10-01';
+    return $self->{version} ||=  '2012-12-01';
 }
 
 =head2 $ts = $ec2->timestamp
@@ -7096,11 +7541,11 @@ sub call {
 	my $content = $response->decoded_content;
 	my $error;
 	if ($content =~ /<Response>/) {
-	    $error = VM::EC2::Dispatch->create_error_object($response->decoded_content,$self);
+	    $error = VM::EC2::Dispatch->create_error_object($response->decoded_content,$self,$_[0]);
 	} else {
 	    my $code = $response->status_line;
 	    my $msg  = $response->decoded_content;
-	    $error = VM::EC2::Error->new({Code=>$code,Message=>$msg},$self);
+	    $error = VM::EC2::Error->new({Code=>$code,Message=>"$msg from API call '$_[0]')"},$self);
 	}
 	$self->error($error);
 	carp  "$error" if $self->print_error;
@@ -7134,6 +7579,14 @@ sub elb_call {
     (my $endpoint = $self->{endpoint}) =~ s/ec2/elasticloadbalancing/;
     local $self->{endpoint} = $endpoint;
     local $self->{version}  = '2012-06-01';
+    $self->call(@_);
+}
+
+sub asg_call {
+    my $self = shift;
+    (my $endpoint = $self->{endpoint}) =~ s/ec2/autoscaling/;
+    local $self->{endpoint} = $endpoint;
+    local $self->{version}  = '2011-01-01';
     $self->call(@_);
 }
 
@@ -7206,19 +7659,16 @@ sub args {
 
 =head1 MISSING METHODS
 
-As of 20 Oct 2012, the following Amazon API calls were NOT
+As of 24 Dec 2012, the following Amazon API calls were NOT
 implemented. Volunteers to implement these calls are most welcome.
 
 BundleInstance
 CancelBundleTask
 CancelConversionTask
 CancelReservedInstancesListing
-CreatePlacementGroup
 CreateReservedInstancesListing
-DeletePlacementGroup
 DescribeBundleTasks
 DescribeConversionTasks
-DescribePlacementGroups
 DescribeReservedInstancesListings
 ImportInstance
 ImportVolume

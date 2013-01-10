@@ -139,6 +139,7 @@ use File::Path 'make_path','remove_tree';
 use File::Basename 'dirname','basename';
 use Scalar::Util 'weaken';
 use String::Approx 'adistr';
+use File::Temp 'tempfile';
 
 use constant GB => 1_073_741_824;
 use constant SERVER_STARTUP_TIMEOUT => 120;
@@ -455,8 +456,11 @@ $source_snapshot may be an string ID, or a VM::EC2::Snapshot object.
 $destination_zone may be a simple region name, such as "us-west-2", or
 a VM::EC2::Region object (as returned by VM::EC2->describe_regions),
 or a VM::EC2::Staging::Manager object that is associated with the
-desired region. The latter form gives you control over the nature of
-the staging instances created in the destination zone.
+desired region.
+
+Note that this call uses the Amazon CopySnapshot API call that was
+introduced in 2012-12-01 and no longer involves the creation of
+staging servers in the source and destination regions.
 
 =cut
 
@@ -466,39 +470,22 @@ sub copy_snapshot {
     my $snap   = $self->ec2->describe_snapshots($snapId) 
 	or croak "Couldn't find snapshot for $snapId";
     my $description = "duplicate of $snap, created by ".__PACKAGE__." during snapshot copying";
+    my $dest_region = ref($dest_manager) && $dest_manager->can('ec2') 
+	              ? $dest_manager->ec2->region
+		      : "$dest_manager";
 
-    my $source = $self->provision_volume(-snapshot_id=>$snapId) 
-	or croak "Couldn't mount volume for $snapId";
-    my $fstype  = $source->fstype;
-    my $blkinfo = $source->server->scmd('sudo','blkid','-p',$source->mtdev);
-    my ($uuid)  = $blkinfo =~ /UUID="(\S+)"/;
-    my ($label) = $blkinfo =~ /LABEL="(\S+)"/;
-    
-    my $dest   = $dest_manager->provision_volume(-fstype => $fstype,
-						 -size   => $source->size,
-						 -label  => $label,
-						 -uuid   => $uuid,
-						 -reuse  => 0,
-	) or croak "Couldn't create new destination volume for $snapId";
+    $self->info("Copying snapshot $snap from ",$self->ec2->region," to $dest_region\n");
+    my $snapshot = $snap->copy(-region       =>  $dest_region,
+			       -description  => $description);
 
-    if ($fstype eq 'raw') {
-	$self->info("Using dd for block level disk copy (will take 1-2 minutes per gigabyte of raw disk).\n");
-	$source->dd($dest)    or croak "dd failed";
-    } else {
-	$self->info("Using rsync for file level disk copy (will take 1-2 minutes per gigabyte of storage used).\n");
-	$source->copy($dest) or croak "rsync failed";
+    while (!eval{$snapshot->current_status}) {
+	sleep 1;
     }
-    
-    $dest->unmount; # don't want this mounted; otherwise it will be unmounted & remounted
-    my $snapshot = $dest->create_snapshot($description);
+    $self->info("New snapshot=$snapshot; status = ",$snapshot->current_status,"\n");
 
     # copy snapshot tags
     my $tags = $snap->tags;
     $snapshot->add_tags($tags);
-    
-    # we don't need these volumes now
-    $source->delete;
-    $dest->delete;
 
     return $snapshot;
 }
@@ -623,7 +610,10 @@ object.
                 it later with a call to get_server().
 
  -architecture  Architecture for the newly-created server
-                instances (e.g. "i386").
+                instances (e.g. "i386"). If not specified, then defaults
+                to the default_architecture() value. If explicitly
+                specified as undef, then the architecture of the matching
+                image will be used.
 
  -instance_type Type of the newly-created server (e.g. "m1.small").
 
@@ -669,6 +659,8 @@ sub provision_server {
     my ($keyname,$keyfile) = $self->_security_key;
     my $security_group     = $self->_security_group;
     my $image              = $self->_search_for_image(%args) or croak "No suitable image found";
+    $args{-architecture}   = $image->architecture;
+
     my ($instance)         = $self->ec2->run_instances(
 	-image_id          => $image,
 	-security_group_id => $security_group,
@@ -676,17 +668,26 @@ sub provision_server {
 	%args,
 	);
     $instance or croak $self->ec2->error_str;
-    $instance->add_tags(StagingRole     => 'StagingInstance',
-			Name            => "Staging server $args{-name} created by ".__PACKAGE__,
-			StagingUsername => $self->username,
-			StagingName     => $args{-name});
+
+    my $success;
+    while (!$success) {
+	# race condition...
+	$success = eval{ $instance->add_tags(StagingRole     => 'StagingInstance',
+					     Name            => "Staging server $args{-name} created by ".__PACKAGE__,
+					     StagingUsername => $self->username,
+					     StagingName     => $args{-name});
+	}
+    }
+
+    my $class = $args{-server_class} || $self->server_class;
 			
-    my $server = $self->server_class()->new(
+    my $server = $class->new(
 	-keyfile  => $keyfile,
 	-username => $self->username,
 	-instance => $instance,
 	-manager  => $self,
 	-name     => $args{-name},
+	@args,
 	);
     eval {
 	local $SIG{ALRM} = sub {die 'timeout'};
@@ -733,6 +734,11 @@ sub get_server {
     local $^W = 0; # prevent an uninitialized value warning
     my %servers = map {$_->name => $_} $self->servers;
     my $server = $servers{$args{-name}} || $self->provision_server(%args);
+
+    # this information needs to be renewed each time
+    $server->username($args{-username}) if $args{-username};
+    bless $server,$args{-server_class}  if $args{-server_class};
+
     $server->start unless $server->ping;
     return $server;
 }
@@ -1192,6 +1198,16 @@ prompting for a password or passphrase on the non-managed host
 strict host checking and forwarding the user agent information from
 the local machine.
 
+=head2 $result = $manager->rsync(\@options,$src1,$src2,$src3...,$dest)
+
+This is a variant of the rsync command in which extra options can be
+passed to rsync by providing an array reference as the first argument. 
+For example:
+
+    $manager->rsync(['--exclude' => '*~'],
+                    '/usr/local/backups',
+                    "$my_server:/usr/local");
+
 =cut
 
 # most general form
@@ -1202,6 +1218,10 @@ sub rsync {
 	unless @_ >= 2;
 
     my @p    = @_;
+    my @user_args = ($p[0] && ref($p[0]) eq 'ARRAY')
+	            ? @{shift @p}
+                    : ();
+
     undef $LastHost;
     undef $LastMt;
     my @paths = map {$self->_resolve_path($_)} @p;
@@ -1228,6 +1248,7 @@ sub rsync {
 	$rsync_args       .= 'v';  # print a line for each file
 	$dots             = '2>&1|/tmp/dots.pl t';
     }
+    $rsync_args .= ' '.join ' ', map {_quote_shell($_)} @user_args if @user_args;
 
     my $src_is_server    = $source_host && UNIVERSAL::isa($source_host,'VM::EC2::Staging::Server');
     my $dest_is_server   = $dest_host   && UNIVERSAL::isa($dest_host,'VM::EC2::Staging::Server');
@@ -1245,17 +1266,18 @@ sub rsync {
 
     # localhost => localhost
     if (!($source_host || $dest_host)) {
-	return system("rsync @source $dest") == 0;
+	my $dots_cmd = $self->_dots_cmd;
+	return system("rsync @source $dest $dots_cmd") == 0;
     }
 
     # localhost           => DataTransferServer
     if ($dest_is_server && !$src_is_server) {
-	return $dest_host->_rsync_put(@source_paths,$dest_path);
+	return $dest_host->_rsync_put($rsync_args,@source_paths,$dest_path);
     }
 
     # DataTransferServer  => localhost
     if ($src_is_server && !$dest_is_server) {
-	return $source_host->_rsync_get(@source_paths,$dest_path);
+	return $source_host->_rsync_get($rsync_args,@source_paths,$dest_path);
     }
 
     if ($source_host eq $dest_host) {
@@ -1282,6 +1304,13 @@ sub rsync {
 				   @source_paths,"$dest_ip:$dest_path",$dots);
     $self->info("...rsync done.\n");
     return $result;
+}
+
+sub _quote_shell {
+    my $thing = shift;
+    $thing =~ s/\s/\ /;
+    $thing =~ s/(['"])/\\($1)/;
+    $thing;
 }
 
 =head2 $manager->dd($source_vol=>$dest_vol)
@@ -1331,13 +1360,9 @@ sub dd {
 	my $keyfile  = $server1->keyfile;
 	$ssh_args    =~ s/$keyfile/$keyname/;  # because keyfile is embedded among args
 	my $pv       = $use_pv ? "2>/dev/null | pv -s ${gigs}G -petr" : '';
-       $server1->ssh(['-t'], "sudo dd if=$device1 $hush $pv | gzip -1 - | ssh $ssh_args $dest_ip 'gunzip -1 - | sudo dd of=$device2'");
+	$server1->ssh(['-t'], "sudo dd if=$device1 $hush $pv | gzip -1 - | ssh $ssh_args $dest_ip 'gunzip -1 - | sudo dd of=$device2'");
     }
 }
-
-#
-# perl -e 'my $b; while (read(STDIN,$b,65536)
-# 
 
 # take real or symbolic name and turn it into a two element
 # list consisting of server object and mount point
@@ -2031,13 +2056,13 @@ sub _search_for_image {
 
     $self->info("Searching for a staging image...\n");
 
-    my $root_type    = $self->on_exit eq 'stop' ? 'ebs' :
-    $args{-root_type};
+    my $root_type    = $self->on_exit eq 'stop' ? 'ebs' : $args{-root_type};
+    my @arch         = $args{-architecture}     ? ('architecture' => $args{-architecture}) : ();
 
     my @candidates = $name =~ /^ami-[0-9a-f]+/ ? $self->ec2->describe_images($name)
 	                                       : $self->ec2->describe_images({'name'             => "*$args{-image_name}*",
 									      'root-device-type' => $root_type,
-									      'architecture'     => $args{-architecture}});
+									      @arch});
     return unless @candidates;
     # this assumes that the name has some sort of timestamp in it, which is true
     # of ubuntu images, but probably not others
@@ -2257,7 +2282,8 @@ sub _unlock {
     my $self     = shift;
     my $resource = shift;
     $resource->refresh;
-    my ($type,$pid) = split /\s+/,$resource->tags->{StagingLock};
+    my $sl = $resource->tags->{StagingLock} or return;
+    my ($type,$pid) = split /\s+/,$sl;
     return unless $pid eq $$;
     $resource->delete_tags('StagingLock');
 }
@@ -2307,16 +2333,31 @@ sub _decrement_usage_count {
     return $in_use;
 }
 
+sub _dots_cmd {
+    my $self = shift;
+    return '' unless $self->verbosity == VERBOSE_INFO;
+    my ($fh,$dots_script) = tempfile('dots_XXXXXXX',SUFFIX=>'.pl',UNLINK=>1,TMPDIR=>1);
+    print $fh $self->_dots_script;
+    close $fh;
+    chmod 0755,$dots_script;
+    return "2>&1|$dots_script t";
+}
+
 sub _upload_dots_script {
     my $self   = shift;
     my $server = shift;
+    my $fh     = $server->scmd_write('cat >/tmp/dots.pl');
+    print $fh $self->_dots_script;
+    close $fh;
+    $server->ssh('chmod +x /tmp/dots.pl');
+}
 
+sub _dots_script {
+    my $self = shift;
     my @lines       = split "\n",longmess();
     my $stack_count = grep /VM::EC2::Staging::Manager/,@lines;
     my $spaces      = ' ' x (($stack_count-1)*3);
-
-    my $fh     = $server->scmd_write('cat >/tmp/dots.pl');
-    print $fh <<END;
+    return <<END;
 #!/usr/bin/perl
 my \$mode = shift || 'b';
 print STDERR "[info] ${spaces}One dot equals ",(\$mode eq 'b'?'100 Mb':'100 files'),': ';
@@ -2329,9 +2370,6 @@ my \$b;
 }
 print STDERR ".\n";
 END
-    ;
-    close $fh;
-    $server->ssh('chmod +x /tmp/dots.pl');
 }
 
 sub DESTROY {

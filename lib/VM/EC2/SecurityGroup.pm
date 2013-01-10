@@ -262,21 +262,6 @@ sub ipPermissionsEgress {
     return @p;
 }
 
-# generate a hash of the ingress permissions, for use in modification
-sub _ingress_permissions {
-    my $self = shift;
-    return $self->{_ingress_permissions} if exists $self->{_ingress_permissions};
-    my %h = map {("$_" => $_)} $self->ipPermissions;
-    return $self->{_ingress_permissions} = \%h;
-}
-
-sub _egress_permissions {
-    my $self = shift;
-    return $self->{_egress_permissions} if exists $self->{_egress_permissions};
-    my %h = map {("$_" => $_)} $self->ipPermissionsEgress;
-    return $self->{_egress_permissions} = \%h;
-}
-
 sub _uncommitted_permissions {
     my $self = shift;
     my ($action,$direction) = @_;   # e.g. 'Authorize','Ingress'
@@ -287,14 +272,12 @@ sub _uncommitted_permissions {
 sub authorize_incoming {
     my $self = shift;
     my $permission = $self->_new_permission(@_);
-    return if $self->_ingress_permissions->{$permission};  # already defined
     $self->{uncommitted}{Authorize}{Ingress}{$permission}=$permission;
 }
 
 sub authorize_outgoing {
     my $self = shift;
     my $permission = $self->_new_permission(@_);
-    return if $self->_egress_permissions->{$permission};  # already defined
     $self->{uncommitted}{Authorize}{Egress}{$permission}=$permission;
 }
 
@@ -304,7 +287,6 @@ sub revoke_incoming {
     if ($self->{uncommitted}{Authorize}{Ingress}{$permission}) {
 	delete $self->{uncommitted}{Authorize}{Ingress}{$permission};
     }
-    return unless $self->_ingress_permissions->{$permission};
     $self->{uncommitted}{Revoke}{Ingress}{$permission}=$permission;
 }
 
@@ -314,7 +296,6 @@ sub revoke_outgoing {
     if ($self->{uncommitted}{Authorize}{Egress}{$permission}) {
 	delete $self->{uncommitted}{Authorize}{Egress}{$permission};
     }
-    return unless $self->_egress_permissions->{$permission};
     $self->{uncommitted}{Revoke}{Egress}{$permission}=$permission;
 }
 
@@ -322,9 +303,11 @@ sub revoke_outgoing {
 sub update {
     my $self = shift;
     my $aws  = $self->aws;
-    local $aws->{error};  # so we can do a double-fetch
     my $result = $aws->update_security_group($self);
-    $self->refresh;
+    {
+	local $aws->{error};  # so we can do a double-fetch
+	$self->refresh;
+    }
     return $result;
 }
 
@@ -332,6 +315,7 @@ sub write { shift->update }
 
 sub refresh {
     my $self = shift;
+    local $self->aws->{raise_error} = 1;
     my $i    = $self->aws->describe_security_groups($self->groupId) or return;
     %$self   = %$i;
 }
