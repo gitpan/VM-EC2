@@ -37,7 +37,7 @@
    "provides" : {
       "VM::EC2" : {
          "file" : "lib/VM/EC2.pm",
-         "version" : "1.22"
+         "version" : "1.23"
       },
       "VM::EC2::AvailabilityZone" : {
          "file" : "lib/VM/EC2/AvailabilityZone.pm",
@@ -410,5 +410,5 @@
          "http://dev.perl.org/licenses/"
       ]
    },
-   "version" : "1.22"
+   "version" : "1.23"
 }
