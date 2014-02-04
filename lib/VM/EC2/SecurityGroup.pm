@@ -139,7 +139,7 @@ Here are some examples:
 
  # ICMP on echo (ping) port from anyone
  $sg->authorize_incoming(-protocol  => 'icmp',
-                         -port      => 0,
+                         -port      => -1,
                          -source_ip => '0.0.0.0/0');
 
  # TCP to port 25 (mail) from instances belonging to
@@ -219,6 +219,7 @@ please see DISCLAIMER.txt for disclaimers of warranty.
 
 use strict;
 use base 'VM::EC2::Generic';
+use VM::EC2 'security_group';
 use VM::EC2::SecurityGroup::IpPermission;
 use Carp 'croak';
 
@@ -226,7 +227,10 @@ sub valid_fields {
     return qw(ownerId groupId groupName groupDescription vpcId ipPermissions ipPermissionsEgress tagSet);
 }
 
-sub primary_id { shift->groupId }
+sub primary_id { 
+    my $self = shift;
+    return $self->groupId || $self->groupName;
+}
 
 sub name { shift->groupName }
 
@@ -283,7 +287,7 @@ sub authorize_outgoing {
 
 sub revoke_incoming {
     my $self = shift;
-    my $permission = $_[0] =~ /^-/ ? $self->_new_permission(@_) : shift;
+    my $permission = $_[0] =~ /^-[A-Za-z]/ ? $self->_new_permission(@_) : shift;
     if ($self->{uncommitted}{Authorize}{Ingress}{$permission}) {
 	delete $self->{uncommitted}{Authorize}{Ingress}{$permission};
     }
@@ -292,7 +296,7 @@ sub revoke_incoming {
 
 sub revoke_outgoing {
     my $self = shift;
-    my $permission = $_[0] =~ /^-/ ? $self->_new_permission(@_) : shift;
+    my $permission = $_[0] =~ /^-[A-Za-z]/ ? $self->_new_permission(@_) : shift;
     if ($self->{uncommitted}{Authorize}{Egress}{$permission}) {
 	delete $self->{uncommitted}{Authorize}{Egress}{$permission};
     }
@@ -315,9 +319,9 @@ sub write { shift->update }
 
 sub refresh {
     my $self = shift;
-    local $self->aws->{raise_error} = 1;
-    my $i    = $self->aws->describe_security_groups($self->groupId) or return;
-    %$self   = %$i;
+    my $i    = $self->aws->describe_security_groups($self->groupId);
+    %$self   = %$i if $i;
+    return defined $i;
 }
 
 sub _new_permission {
@@ -331,7 +335,7 @@ sub _new_permission {
 
     $args{-source_ip} ||= $args{-source};
 
-    my $ports     = $args{-port} || $args{-ports};
+    my $ports     = defined($args{-port}) ? $args{-port} : $args{-ports};
     my ($from_port,$to_port);
     if ($ports =~ /^(\d+)\.\.(\d+)$/) {
 	$from_port = $1;

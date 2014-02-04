@@ -13,9 +13,9 @@ VM::EC2::Dispatch - Create Perl objects from AWS XML requests
 
   use VM::EC2;
 
-  VM::EC2::Dispatch->add_override('DescribeRegions'=>\&mysub);
+  VM::EC2::Dispatch->register('DescribeRegions'=>\&mysub);
 
-  VM::EC2::Dispatch->add_override('DescribeTags'=>'My::Type');
+  VM::EC2::Dispatch->replace('DescribeRegions'=>'My::Type');
   
   sub mysub {
       my ($parsed_xml_object,$ec2) = @_;
@@ -27,17 +27,17 @@ VM::EC2::Dispatch - Create Perl objects from AWS XML requests
 
 This class handles turning the XML response to AWS requests into perl
 objects. Only one method is likely to be useful to developers, the
-add_override() class method. This allows you to replace the handlers
+replace() class method. This allows you to replace the handlers
 used to map the response onto objects.
 
-=head2 VM::EC2::Dispatch->add_override($request_name => \&sub)
+=head2 VM::EC2::Dispatch->replace($request_name => \&sub)
 
-=head2 VM::EC2::Dispatch->add_override($request_name => 'Class::Name')
+=head2 VM::EC2::Dispatch->replace($request_name => 'Class::Name')
 
-=head2 VM::EC2::Dispatch->add_override($request_name => 'method_name,arg1,arg2,...')
+=head2 VM::EC2::Dispatch->replace($request_name => 'method_name,arg1,arg2,...')
 
 Before invoking a VM::EC2 request you wish to customize, call the
-add_override() method with two arguments. The first argument is the
+replace() method with two arguments. The first argument is the
 name of the request you wish to customize, such as
 "DescribeVolumes". The second argument is either a code reference, a
 VM::EC2::Dispatch method name and arguments (separated by commas), or
@@ -91,235 +91,67 @@ VM::EC2::Object's as_string method:
  print $i->as_string;
 
 This will give you a Data::Dumper representation of the XML after it
-has been parsed.
+has been parsed. Look at the calls to VM::EC2::Dispatch->register() in
+the various VM/EC2/REST/*.pm modules for many examples of how this
+works.
 
-Look at the data structure "ObjectRegistration" in the source code for
-this module to see many examples of response to object mapping.
+Note that the replace() method was called add_override() in previous
+versions of this module. add_override() is recognized as an alias for
+backward compatibility.
+
+=head2 VM::EC2::Dispatch->register($request_name1 => \&sub1,$request_name2 => \&sub2,...)
+
+Similar to replace() but if the request name is already registered
+does not overwrite it. You may provide multiple request=>handler pairs.
 
 =head1 OBJECT CREATION METHODS
 
 The following methods perform simple pre-processing of the parsed XML
 (a hash of hashes) before passing the modified data structure to the
 designated object class. They are used as the second argument to
-add_override()
+VM::EC2::Dispatch->register().
 
 =cut
+    ;
 
-my %OVERRIDE;
+my $REGISTRATION = {};
+VM::EC2::Dispatch->register(Error => 'VM::EC2::Error');
+*add_override    = \&replace; # backward compatibility
 
-use constant ObjectRegistration => {
-    Error             => 'VM::EC2::Error',
-    DescribeInstances => sub { load_module('VM::EC2::ReservationSet');
-			       my $r = VM::EC2::ReservationSet->new(@_) or return;
-			       return $r->instances;
-    },
-    RunInstances      => sub { load_module('VM::EC2::Instance::Set');
-			       my $s = VM::EC2::Instance::Set->new(@_) or return;
-			       return $s->instances;
-    },
-    EnableVolumeIO    => 'boolean',
-    DescribeSnapshots => 'fetch_items,snapshotSet,VM::EC2::Snapshot',
-    DescribeVolumes   => 'fetch_items,volumeSet,VM::EC2::Volume',
-    DescribeImages    => 'fetch_items,imagesSet,VM::EC2::Image',
-    DescribeRegions   => 'fetch_items,regionInfo,VM::EC2::Region',
-    DescribeInstanceStatus => 'fetch_items_iterator,instanceStatusSet,VM::EC2::Instance::StatusItem,instance_status',
-    DescribeAvailabilityZones  => 'fetch_items,availabilityZoneInfo,VM::EC2::AvailabilityZone',
-    DescribeSecurityGroups   => 'fetch_items,securityGroupInfo,VM::EC2::SecurityGroup',
-    DescribeVolumeStatus => 'fetch_items_iterator,volumeStatusSet,VM::EC2::Volume::StatusItem,volume_status',
-    CreateSecurityGroup      => 'VM::EC2::SecurityGroup',
-    DeleteSecurityGroup      => 'boolean',
-    AuthorizeSecurityGroupIngress  => 'boolean',
-    AuthorizeSecurityGroupEgress   => 'boolean',
-    RevokeSecurityGroupIngress  => 'boolean',
-    RevokeSecurityGroupEgress   => 'boolean',
-    DescribeTags      => 'fetch_items,tagSet,VM::EC2::Tag,nokey',
-    CreateVolume      => 'VM::EC2::Volume',
-    DeleteVolume      => 'boolean',
-    AttachVolume      => 'VM::EC2::BlockDevice::Attachment',
-    DetachVolume      => 'VM::EC2::BlockDevice::Attachment',
-    CreateSnapshot    => 'VM::EC2::Snapshot',
-    DeleteSnapshot    => 'boolean',
-    CopySnapshot      => sub { shift->{snapshotId} },
-    ModifySnapshotAttribute => 'boolean',
-    ResetSnapshotAttribute  => 'boolean',
-    ModifyInstanceAttribute => 'boolean',
-    ModifyImageAttribute    => 'boolean',
-    ResetInstanceAttribute  => 'boolean',
-    ResetImageAttribute     => 'boolean',
-    CreateImage             => sub { 
-	my ($data,$aws) = @_;
-	my $image_id = $data->{imageId} or return;
-	sleep 2; # wait for the thing to register
-	return $aws->describe_images($image_id);
-    },
-    RegisterImage             => sub { 
-	my ($data,$aws) = @_;
-	my $image_id = $data->{imageId} or return;
-	sleep 2; # wait for the thing to register
-	return $aws->describe_images($image_id);
-    },
-    DeregisterImage      => 'boolean',
-    DescribeAddresses => 'fetch_items,addressesSet,VM::EC2::ElasticAddress',
-    AssociateAddress  => sub {
-	my $data = shift;
-	return $data->{associationId} || ($data->{return} eq 'true');
-    },
-    DisassociateAddress => 'boolean',
-    AllocateAddress   => 'VM::EC2::ElasticAddress',
-    ReleaseAddress    => 'boolean',
-    CreateTags        => 'boolean',
-    DeleteTags        => 'boolean',
-    StartInstances       => 'fetch_items,instancesSet,VM::EC2::Instance::State::Change',
-    StopInstances        => 'fetch_items,instancesSet,VM::EC2::Instance::State::Change',
-    TerminateInstances   => 'fetch_items,instancesSet,VM::EC2::Instance::State::Change',
-    RebootInstances      => 'boolean',
-    ConfirmProductInstance => 'boolean',
-    MonitorInstances     => 'fetch_items,instancesSet,VM::EC2::Instance::MonitoringState',
-    UnmonitorInstances   => 'fetch_items,instancesSet,VM::EC2::Instance::MonitoringState',
-    GetConsoleOutput     => 'VM::EC2::Instance::ConsoleOutput',
-    GetPasswordData      => 'VM::EC2::Instance::PasswordData',
-    DescribeKeyPairs     => 'fetch_items,keySet,VM::EC2::KeyPair',
-    CreateKeyPair        => 'VM::EC2::KeyPair',
-    ImportKeyPair        => 'VM::EC2::KeyPair',
-    DeleteKeyPair        => 'boolean',
-    DescribeReservedInstancesOfferings 
-	 => 'fetch_items,reservedInstancesOfferingsSet,VM::EC2::ReservedInstance::Offering',
-    DescribeReservedInstances          => 'fetch_items,reservedInstancesSet,VM::EC2::ReservedInstance',
-    PurchaseReservedInstancesOffering  => sub { my ($data,$ec2) = @_;
-						my $ri_id = $data->{reservedInstancesId} or return;
-						return $ec2->describe_reserved_instances($ri_id);
-    },
-    CreateSpotDatafeedSubscription    => 'fetch_one,spotDatafeedSubscription,VM::EC2::Spot::DatafeedSubscription',
-    DescribeSpotDatafeedSubscription  => 'fetch_one,spotDatafeedSubscription,VM::EC2::Spot::DatafeedSubscription',
-    DeleteSpotDatafeedSubscription    => 'boolean',
-    DescribeSpotPriceHistory          => 'fetch_items_iterator,spotPriceHistorySet,VM::EC2::Spot::PriceHistory,spot_price_history',
-    RequestSpotInstances              => 'fetch_items,spotInstanceRequestSet,VM::EC2::Spot::InstanceRequest',
-    CancelSpotInstanceRequests        => 'fetch_items,spotInstanceRequestSet,VM::EC2::Spot::InstanceRequest',
-    DescribeSpotInstanceRequests      => 'fetch_items,spotInstanceRequestSet,VM::EC2::Spot::InstanceRequest',
-    GetFederationToken                => 'fetch_one,GetFederationTokenResult,VM::EC2::Security::Token',
-    GetSessionToken                   => 'fetch_one,GetSessionTokenResult,VM::EC2::Security::Token',
-    # placement groups
-    DescribePlacementGroups           => 'fetch_items,placementGroupSet,VM::EC2::PlacementGroup',
-    CreatePlacementGroup              => 'boolean',
-    DeletePlacementGroup              => 'boolean',
-    # vpcs
-    CreateVpc                         => 'fetch_one,vpc,VM::EC2::VPC',
-    DescribeVpcs                      => 'fetch_items,vpcSet,VM::EC2::VPC',
-    DeleteVpc                         => 'boolean',
-    # dhcp options
-    DescribeDhcpOptions               => 'fetch_items,dhcpOptionsSet,VM::EC2::VPC::DhcpOptions,nokey',
-    CreateDhcpOptions                 => 'fetch_one,dhcpOptions,VM::EC2::VPC::DhcpOptions,nokey',
-    DeleteDhcpOptions                 => 'boolean',
-    AssociateDhcpOptions              => 'boolean',
-    # network interfaces
-    CreateNetworkInterface            => 'fetch_one,networkInterface,VM::EC2::NetworkInterface',
-    DeleteNetworkInterface            => 'boolean',
-    DescribeNetworkInterfaces         => 'fetch_items,networkInterfaceSet,VM::EC2::NetworkInterface',
-    ModifyNetworkInterfaceAttribute   => 'boolean',
-    ResetNetworkInterfaceAttribute    => 'boolean',
-    AttachNetworkInterface            => sub { shift->{attachmentId}    },
-    DetachNetworkInterface            => 'boolean',
-    AssignPrivateIpAddresses          => 'boolean',
-    UnassignPrivateIpAddresses        => 'boolean',
-    # subnets
-    CreateSubnet                      => 'fetch_one,subnet,VM::EC2::VPC::Subnet',
-    DeleteSubnet                      => 'boolean',
-    DescribeSubnets                   => 'fetch_items,subnetSet,VM::EC2::VPC::Subnet',
-    # internet gateways
-    DescribeInternetGateways          => 'fetch_items,internetGatewaySet,VM::EC2::VPC::InternetGateway',
-    # route tables
-    CreateRouteTable                  => 'fetch_one,routeTable,VM::EC2::VPC::RouteTable',
-    DeleteRouteTable                  => 'boolean',
-    DescribeRouteTables               => 'fetch_items,routeTableSet,VM::EC2::VPC::RouteTable',
-    AssociateRouteTable               => sub { shift->{associationId}    },
-    ReplaceRouteTableAssociation      => sub { shift->{newAssociationId} },
-    # route rules
-    CreateRoute                       => 'boolean',
-    DeleteRoute                       => 'boolean',
-    ReplaceRoute                      => 'boolean',
-    # internet gateways
-    CreateInternetGateway             => 'fetch_one,internetGateway,VM::EC2::VPC::InternetGateway',
-    DescribeInternetGateways          => 'fetch_items,internetGatewaySet,VM::EC2::VPC::InternetGateway',
-    DeleteInternetGateway             => 'boolean',
-    AttachInternetGateway             => 'boolean',
-    DetachInternetGateway             => 'boolean',
-    # network acls
-    DescribeNetworkAcls               => 'fetch_items,networkAclSet,VM::EC2::VPC::NetworkAcl',
-    CreateNetworkAcl                  => 'fetch_one,networkAcl,VM::EC2::VPC::NetworkAcl',
-    DeleteNetworkAcl                  => 'boolean',
-    CreateNetworkAclEntry             => 'boolean',
-    DeleteNetworkAclEntry             => 'boolean',
-    ReplaceNetworkAclAssociation      => sub { shift->{newAssociationId} },
-    ReplaceNetworkAclEntry            => 'boolean',
-    # virtual private networks
-    DescribeVpnGateways               => 'fetch_items,vpnGatewaySet,VM::EC2::VPC::VpnGateway',
-    CreateVpnGateway                  => 'fetch_one,vpnGateway,VM::EC2::VPC::VpnGateway',
-    DeleteVpnGateway                  => 'boolean',
-    AttachVpnGateway                  => sub { shift->{attachment}{state} },
-    DetachVpnGateway                  => 'boolean',
-    DescribeVpnConnections            => 'fetch_items,vpnConnectionSet,VM::EC2::VPC::VpnConnection',
-    CreateVpnConnection               => 'fetch_one,vpnConnection,VM::EC2::VPC::VpnConnection',
-    DeleteVpnConnection               => 'boolean',
-    DescribeCustomerGateways          => 'fetch_items,customerGatewaySet,VM::EC2::VPC::CustomerGateway',
-    CreateCustomerGateway             => 'fetch_one,customerGateway,VM::EC2::VPC::CustomerGateway',
-    DeleteCustomerGateway             => 'boolean',
-    CreateVpnConnectionRoute          => 'boolean',
-    DeleteVpnConnectionRoute          => 'boolean',
-    DisableVgwRoutePropagation        => 'boolean',
-    EnableVgwRoutePropagation         => 'boolean',
-    # elastic load balancers
-    DescribeLoadBalancers             => 'fetch_members,LoadBalancerDescriptions,VM::EC2::ELB',
-    ConfigureHealthCheck              => 'elb_fetch_one,HealthCheck,VM::EC2::ELB::HealthCheck',
-    CreateAppCookieStickinessPolicy   => sub { exists shift->{CreateAppCookieStickinessPolicyResult} },
-    CreateLBCookieStickinessPolicy    => sub { exists shift->{CreateLBCookieStickinessPolicyResult} },
-    CreateLoadBalancer                => sub { shift->{CreateLoadBalancerResult}{DNSName} },
-    DeleteLoadBalancer                => sub { exists shift->{DeleteLoadBalancerResult} },
-    CreateLoadBalancerListeners       => sub { exists shift->{CreateLoadBalancerListenersResult} },
-    DeleteLoadBalancerListeners       => sub { exists shift->{DeleteLoadBalancerListenersResult} },
-    DisableAvailabilityZonesForLoadBalancer => 'elb_member_list,AvailabilityZones',
-    EnableAvailabilityZonesForLoadBalancer => 'elb_member_list,AvailabilityZones',
-    RegisterInstancesWithLoadBalancer => 'elb_member_list,Instances,InstanceId',
-    DeregisterInstancesFromLoadBalancer => 'elb_member_list,Instances,InstanceId',
-    SetLoadBalancerListenerSSLCertificate
-                                      => sub { exists shift->{SetLoadBalancerListenerSSLCertificateResult} },
-    DescribeInstanceHealth            => 'fetch_members,InstanceStates,VM::EC2::ELB::InstanceState', 
-    CreateLoadBalancerPolicy          => sub { exists shift->{CreateLoadBalancerPolicyResult} },
-    DeleteLoadBalancerPolicy          => sub { exists shift->{DeleteLoadBalancerPolicyResult} },
-    DescribeLoadBalancerPolicies      => 'fetch_members,PolicyDescriptions,VM::EC2::ELB::PolicyDescription',
-    DescribeLoadBalancerPolicyTypes   => 'fetch_members,PolicyTypeDescriptions,VM::EC2::ELB::PolicyTypeDescription',
-    SetLoadBalancerPoliciesOfListener => sub { exists shift->{SetLoadBalancerPoliciesOfListenerResult} },
-    ApplySecurityGroupsToLoadBalancer => 'elb_member_list,SecurityGroups',
-    AttachLoadBalancerToSubnets       => 'elb_member_list,Subnets',
-    DetachLoadBalancerFromSubnets     => 'elb_member_list,Subnets',
-    SetLoadBalancerPoliciesForBackendServer => sub { exists shift->{SetLoadBalancerPoliciesForBackendServerResult} },
-    # auto scaling and launch controls
-    DescribeLaunchConfigurations      => 'fetch_members,LaunchConfigurations,VM::EC2::LaunchConfiguration',
-    DescribeAutoScalingGroups         => 'fetch_members,AutoScalingGroups,VM::EC2::ASG',
-};
-
+# Not clear that you ever need to instantiate this object as it has
+# no instance data.
 sub new {
-    my $self    = shift;
-    return bless {},ref $self || $self;
+    my $class    = shift;
+    my $self= bless {},ref $class || $class;
+    return $self;
 }
 
-sub add_override {
+sub replace {
     my $self = shift;
-    my ($request_name,$object_creator) = @_;
-    $OVERRIDE{$request_name} = $object_creator;
+    while (my ($request_name,$object_creator) = splice(@_,0,2)) {
+	$REGISTRATION->{$request_name} = $object_creator;
+    }
 }
 
-sub response2objects {
-    my $self     = shift;
-    my ($response,$ec2) = @_;
+sub register {
+    my $self = shift;
+    while (my ($request_name,$object_creator) = splice(@_,0,2)) {
+	$REGISTRATION->{$request_name} ||= $object_creator;
+    }
+}
 
-    my $handler    = $self->class_from_response($response) or return;
-    my $content  = $response->decoded_content;
+# new way
+sub content2objects {
+    my $self = shift;
+    my ($action,$content,$ec2) = @_;
 
+    my $handler = $REGISTRATION->{$action} || 'VM::EC2::Generic';
     my ($method,@params) = split /,/,$handler;
 
     if (ref $handler eq 'CODE') {
 	my $parsed = $self->new_xml_parser->XMLin($content);
-	$handler->($parsed,$ec2,@{$parsed}{'xmlns','requestId'});
+	my $req_id_tag = $parsed->{requestId} ? 'requestId' : 'RequestId';
+	$handler->($parsed,$ec2,@{$parsed}{'xmlns',$req_id_tag});
     }
     elsif ($self->can($method)) {
 	return $self->$method($content,$ec2,@params);
@@ -329,14 +161,6 @@ sub response2objects {
 	my $parser   = $self->new();
 	$parser->parse($content,$ec2,$handler);
     }
-}
-
-sub class_from_response {
-    my $self     = shift;
-    my $response = shift;
-    my ($action) = $response->request->content =~ /Action=([^&]+)/;
-    $action      = uri_unescape($action);
-    return $OVERRIDE{$action} || ObjectRegistration->{$action} || 'VM::EC2::Generic';
 }
 
 sub parser { 
@@ -373,13 +197,13 @@ This is used for XML responses like this:
 It looks inside the structure for the tag named $tag ("return" if not
 provided), and returns a true value if the contents equals "true".
 
-Pass it to add_override() like this:
+Pass it to replace() like this:
 
-  VM::EC2::Dispatch->add_override(DeleteVolume => 'boolean,return';
+  VM::EC2::Dispatch->replace(DeleteVolume => 'boolean,return';
 
 or, since "return" is the default tag:
 
-  VM::EC2::Dispatch->add_override(DeleteVolume => 'boolean';
+  VM::EC2::Dispatch->replace(DeleteVolume => 'boolean';
 
 =cut
 
@@ -447,9 +271,9 @@ sub elb_member_list {
                            @{$parsed->{$result_key}{$tag}{member}};
 }
 
-# identical to fetch_one, except looks inside the *Result tag that ELB API calls
-# return
-sub elb_fetch_one {
+# identical to fetch_one, except looks inside the (APICallName)Result tag that
+# ELB and RDS API calls return
+sub fetch_one_result {
     my $self = shift;
     my ($content,$ec2,$tag,$class,$nokey) = @_; 
     load_module($class);
@@ -457,7 +281,7 @@ sub elb_fetch_one {
     my $parsed = $parser->XMLin($content);
     my ($result_key) = grep /Result$/,keys %$parsed;
     my $obj    = $parsed->{$result_key}{$tag} or return;
-    return $class->new($obj,$ec2,@{$parsed}{'xmlns','requestId'});
+    return $class->new($obj,$ec2,@{$parsed}{'xmlns','RequestId'});
 }
 
 sub fetch_one {
@@ -498,9 +322,9 @@ contents to $object_class->new(). The optional $nokey argument is used
 to suppress XML::Simple's default flattening behavior turning tags
 named "key" into hash keys.
 
-Pass it to add_override() like this:
+Pass it to replace() like this:
 
-  VM::EC2::Dispatch->add_override(DescribeVolumes => 'fetch_items,volumeSet,VM::EC2::Volume')
+  VM::EC2::Dispatch->replace(DescribeVolumes => 'fetch_items,volumeSet,VM::EC2::Volume')
 
 =cut
 
@@ -530,7 +354,7 @@ sub fetch_members {
     my $parsed = $parser->XMLin($content);
     my ($result_key) = grep /Result$/,keys %$parsed;
     my $list   = $parsed->{$result_key}{$tag}{member} or return;
-    return map {$class->new($_,$ec2,@{$parsed}{'xmlns','requestId'})} @$list;
+    return map {$class->new($_,$ec2,@{$parsed}{'xmlns','RequestId'})} @$list;
 }
 
 =head2 @objects = $dispatch->fetch_items_iterator($raw_xml,$ec2,$container_tag,$object_class,$token_name)
@@ -579,14 +403,24 @@ sub create_objects {
 sub create_error_object {
     my $self = shift;
     my ($content,$ec2,$API_call) = @_;
-    my $class   = ObjectRegistration->{Error};
+    my $class   = $REGISTRATION->{Error};
     eval "require $class; 1" || die $@ unless $class->can('new');
     my $parsed = $self->new_xml_parser->XMLin($content);
     if (defined $API_call) {
 	$parsed->{Errors}{Error}{Message} =~ s/\.$//;
-	$parsed->{Errors}{Error}{Message} .= " from API call '$API_call'";
+	$parsed->{Errors}{Error}{Message} .= ", at API call '$API_call'";
     }
-    return $class->new($parsed->{Errors}{Error},$ec2,@{$parsed}{'xmlns','requestId'});
+    return $class->new($parsed->{Errors}{Error},$ec2,@{$parsed}{'xmlns','RequestID'});
+}
+
+# alternate method used for ELB, RDS calls
+sub create_alt_error_object {
+    my $self = shift;
+    my ($content,$ec2) = @_;
+    my $class   = 'VM::EC2::Error';
+    eval "require $class; 1" || die $@ unless $class->can('new');
+    my $parsed = $self->new_xml_parser->XMLin($content);
+    return $class->new($parsed->{Error},$ec2,@{$parsed}{'xmlns','RequestId'});
 }
 
 # not a method!
@@ -618,8 +452,8 @@ Now subclass VM::EC2 to add the appropriate overrides to the new() method:
 
  sub new {
    my $class = shift;
-   VM::EC2::Dispatch->add_override(CreateVolume   =>'MyVolume');
-   VM::EC2::Dispatch->add_override(DescribeVolumes=>'fetch_items,volumeSet,MyVolume');
+   VM::EC2::Dispatch->replace(CreateVolume   =>'MyVolume');
+   VM::EC2::Dispatch->replace(DescribeVolumes=>'fetch_items,volumeSet,MyVolume');
    return $class->SUPER::new(@_);
  }
 

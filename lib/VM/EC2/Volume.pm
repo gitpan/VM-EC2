@@ -45,7 +45,7 @@ The following object methods are supported:
  createTime       -- Timestamp for when volume was created.
  volumeType       -- The volume type, one of "standard" or "io1"
  iops             -- The number of I/O operations per second that the volume
-                     supports, an integer between 100 and 2000. Only valid for
+                     supports, an integer between 100 and 4000. Only valid for
                      volumes of type "io1".
  tags             -- Hashref containing tags associated with this group.
                      See L<VM::EC2::Generic>.
@@ -263,11 +263,31 @@ sub current_status {
     $self->status;
 }
 
+sub current_status_async {
+    my $self = shift;
+    my $to_caller = VM::EC2->condvar;
+
+    my $cv = $self->aws->describe_volumes_async($self->volumeId);
+
+    $cv->cb(sub {
+	my $i = shift->recv;
+	if ($i) {
+	    $to_caller->send($i->status);
+	} else {
+	    $to_caller->send;
+	}
+	    });
+
+    return $to_caller;
+}
+
+
 sub refresh {
     my $self = shift;
     local $self->aws->{raise_error} = 1;
     my $v    = $self->aws->describe_volumes($self->volumeId);
-    %$self   = %$v;
+    %$self   = %$v if $v;
+    return defined $v;
 }
 
 sub auto_enable_io {

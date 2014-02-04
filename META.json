@@ -4,7 +4,7 @@
       "Lincoln Stein <lincoln.stein@oicr.on.ca>"
    ],
    "dynamic_config" : 1,
-   "generated_by" : "Module::Build version 0.38, CPAN::Meta::Converter version 2.112150",
+   "generated_by" : "Module::Build version 0.4005, CPAN::Meta::Converter version 2.112621",
    "license" : [
       "perl_5"
    ],
@@ -20,12 +20,12 @@
          }
       },
       "runtime" : {
-         "recommends" : {
-            "JSON" : 0
-         },
          "requires" : {
+            "AnyEvent" : "7.04",
+            "AnyEvent::HTTP" : "2.15",
             "Digest::SHA" : "5.47",
             "File::Path" : "2.08",
+            "JSON" : 0,
             "LWP" : "5.835",
             "MIME::Base64" : "3.08",
             "String::Approx" : "3.26",
@@ -35,9 +35,21 @@
       }
    },
    "provides" : {
+      "RetryTimer" : {
+         "file" : "lib/VM/EC2.pm",
+         "version" : 0
+      },
       "VM::EC2" : {
          "file" : "lib/VM/EC2.pm",
-         "version" : "1.23"
+         "version" : "1.25"
+      },
+      "VM::EC2::ASG" : {
+         "file" : "lib/VM/EC2/ASG.pm",
+         "version" : 0
+      },
+      "VM::EC2::AccountAttributes" : {
+         "file" : "lib/VM/EC2/AccountAttributes.pm",
+         "version" : 0
       },
       "VM::EC2::AvailabilityZone" : {
          "file" : "lib/VM/EC2/AvailabilityZone.pm",
@@ -61,6 +73,10 @@
       },
       "VM::EC2::BlockDevice::Mapping::EBS" : {
          "file" : "lib/VM/EC2/BlockDevice/Mapping/EBS.pm",
+         "version" : 0
+      },
+      "VM::EC2::CondVar" : {
+         "file" : "lib/VM/EC2.pm",
          "version" : 0
       },
       "VM::EC2::Dispatch" : {
@@ -183,6 +199,10 @@
          "file" : "lib/VM/EC2/Instance/State/Change.pm",
          "version" : 0
       },
+      "VM::EC2::Instance::State::Reason" : {
+         "file" : "lib/VM/EC2/Instance/State/Reason.pm",
+         "version" : 0
+      },
       "VM::EC2::Instance::Status" : {
          "file" : "lib/VM/EC2/Instance/Status.pm",
          "version" : 0
@@ -203,6 +223,10 @@
          "file" : "lib/VM/EC2/KeyPair.pm",
          "version" : 0
       },
+      "VM::EC2::LaunchConfiguration" : {
+         "file" : "lib/VM/EC2/LaunchConfiguration.pm",
+         "version" : 0
+      },
       "VM::EC2::NetworkInterface" : {
          "file" : "lib/VM/EC2/NetworkInterface.pm",
          "version" : 0
@@ -219,8 +243,140 @@
          "file" : "lib/VM/EC2/NetworkInterface/PrivateIpAddress.pm",
          "version" : 0
       },
+      "VM::EC2::ParmParser" : {
+         "file" : "lib/VM/EC2/ParmParser.pm",
+         "version" : 0
+      },
+      "VM::EC2::PlacementGroup" : {
+         "file" : "lib/VM/EC2/PlacementGroup.pm",
+         "version" : 0
+      },
       "VM::EC2::ProductCode" : {
          "file" : "lib/VM/EC2/ProductCode.pm",
+         "version" : 0
+      },
+      "VM::EC2::REST::ami" : {
+         "file" : "lib/VM/EC2/REST/ami.pm",
+         "version" : 0
+      },
+      "VM::EC2::REST::autoscaling" : {
+         "file" : "lib/VM/EC2/REST/autoscaling.pm",
+         "version" : 0
+      },
+      "VM::EC2::REST::customer_gateway" : {
+         "file" : "lib/VM/EC2/REST/customer_gateway.pm",
+         "version" : 0
+      },
+      "VM::EC2::REST::devpay" : {
+         "file" : "lib/VM/EC2/REST/devpay.pm",
+         "version" : 0
+      },
+      "VM::EC2::REST::dhcp" : {
+         "file" : "lib/VM/EC2/REST/dhcp.pm",
+         "version" : 0
+      },
+      "VM::EC2::REST::ebs" : {
+         "file" : "lib/VM/EC2/REST/ebs.pm",
+         "version" : 0
+      },
+      "VM::EC2::REST::elastic_ip" : {
+         "file" : "lib/VM/EC2/REST/elastic_ip.pm",
+         "version" : 0
+      },
+      "VM::EC2::REST::elastic_load_balancer" : {
+         "file" : "lib/VM/EC2/REST/elastic_load_balancer.pm",
+         "version" : 0
+      },
+      "VM::EC2::REST::elastic_network_interface" : {
+         "file" : "lib/VM/EC2/REST/elastic_network_interface.pm",
+         "version" : 0
+      },
+      "VM::EC2::REST::general" : {
+         "file" : "lib/VM/EC2/REST/general.pm",
+         "version" : 0
+      },
+      "VM::EC2::REST::instance" : {
+         "file" : "lib/VM/EC2/REST/instance.pm",
+         "version" : 0
+      },
+      "VM::EC2::REST::internet_gateway" : {
+         "file" : "lib/VM/EC2/REST/internet_gateway.pm",
+         "version" : 0
+      },
+      "VM::EC2::REST::keys" : {
+         "file" : "lib/VM/EC2/REST/keys.pm",
+         "version" : 0
+      },
+      "VM::EC2::REST::monitoring" : {
+         "file" : "lib/VM/EC2/REST/monitoring.pm",
+         "version" : 0
+      },
+      "VM::EC2::REST::network_acl" : {
+         "file" : "lib/VM/EC2/REST/network_acl.pm",
+         "version" : 0
+      },
+      "VM::EC2::REST::placement_group" : {
+         "file" : "lib/VM/EC2/REST/placement_group.pm",
+         "version" : 0
+      },
+      "VM::EC2::REST::private_ip" : {
+         "file" : "lib/VM/EC2/REST/private_ip.pm",
+         "version" : 0
+      },
+      "VM::EC2::REST::reserved_instance" : {
+         "file" : "lib/VM/EC2/REST/reserved_instance.pm",
+         "version" : 0
+      },
+      "VM::EC2::REST::route_table" : {
+         "file" : "lib/VM/EC2/REST/route_table.pm",
+         "version" : 0
+      },
+      "VM::EC2::REST::security_group" : {
+         "file" : "lib/VM/EC2/REST/security_group.pm",
+         "version" : 0
+      },
+      "VM::EC2::REST::security_token" : {
+         "file" : "lib/VM/EC2/REST/security_token.pm",
+         "version" : 0
+      },
+      "VM::EC2::REST::spot_instance" : {
+         "file" : "lib/VM/EC2/REST/spot_instance.pm",
+         "version" : 0
+      },
+      "VM::EC2::REST::subnet" : {
+         "file" : "lib/VM/EC2/REST/subnet.pm",
+         "version" : 0
+      },
+      "VM::EC2::REST::tag" : {
+         "file" : "lib/VM/EC2/REST/tag.pm",
+         "version" : 0
+      },
+      "VM::EC2::REST::vm_export" : {
+         "file" : "lib/VM/EC2/REST/vm_export.pm",
+         "version" : 0
+      },
+      "VM::EC2::REST::vm_import" : {
+         "file" : "lib/VM/EC2/REST/vm_import.pm",
+         "version" : 0
+      },
+      "VM::EC2::REST::vpc" : {
+         "file" : "lib/VM/EC2/REST/vpc.pm",
+         "version" : 0
+      },
+      "VM::EC2::REST::vpn" : {
+         "file" : "lib/VM/EC2/REST/vpn.pm",
+         "version" : 0
+      },
+      "VM::EC2::REST::vpn_gateway" : {
+         "file" : "lib/VM/EC2/REST/vpn_gateway.pm",
+         "version" : 0
+      },
+      "VM::EC2::REST::windows" : {
+         "file" : "lib/VM/EC2/REST/windows.pm",
+         "version" : 0
+      },
+      "VM::EC2::REST::zone" : {
+         "file" : "lib/VM/EC2/REST/zone.pm",
          "version" : 0
       },
       "VM::EC2::Region" : {
@@ -305,10 +461,6 @@
       },
       "VM::EC2::Staging::Volume" : {
          "file" : "lib/VM/EC2/Staging/Volume.pm",
-         "version" : 0
-      },
-      "VM::EC2::State::Reason" : {
-         "file" : "lib/VM/EC2/Instance/State/Reason.pm",
          "version" : 0
       },
       "VM::EC2::Tag" : {
@@ -410,5 +562,5 @@
          "http://dev.perl.org/licenses/"
       ]
    },
-   "version" : "1.23"
+   "version" : "1.25"
 }

@@ -141,8 +141,9 @@ Optional Arguments:
                           standard
 
  -iops                 -- The number of I/O operations per second (IOPS) that
-                          the volume supports.  Range is 100 to 2000.  Required
-                          when volume type is io1.
+                          the volume supports.  Range is 100 to 4000.  Required
+                          when volume type is io1.  IOPS must be 30-to-1 ratio
+                          to size.  ie: 3000 IOPS volume must be at least 100GB.
 
 On success, the returned value is a L<VM::EC2::Volume> object.
 
@@ -277,7 +278,8 @@ sub refresh {
     my $self = shift;
     local $self->aws->{raise_error} = 1;
     my $s = $self->aws->describe_snapshots($self);
-    %$self  = %$s;
+    %$self  = %$s if $s;
+    return defined $s
 }
 
 sub register_image {
@@ -320,6 +322,21 @@ sub current_status {
     $self->refresh;
     return $self->status;
 }
+
+sub current_status_async {
+    my $self = shift;
+    my $to_caller = VM::EC2->condvar;
+
+    my $cv = $self->aws->describe_snapshots_async(-snapshot_id=>$self->snapshotId);
+
+    $cv->cb(sub {
+	my $i = shift->recv;
+	$to_caller->send($i->status)
+	    });
+
+    return $to_caller;
+}
+
 
 sub createVolumePermissions {
     my $self = shift;

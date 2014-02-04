@@ -21,7 +21,7 @@ my $msg =
 '
 # This test will launch two "micro" instances under your Amazon account
 # and then terminate them, incurring a one hour runtime charge for each.
-# This will incur a charge of \$0.04 (as of July 2012), which may be covered
+# This will incur a charge of $0.04 (as of July 2012), which may be covered
 # under the AWS free tier. Also be aware that this test may take several
 # minutes to complete due to tests that launch, start, and stop instances.
 #
@@ -85,7 +85,8 @@ is($listing[0],'01.describe.t','put copied files with correct structure');
 # (need lots more tests of syntactic correctness of the rsync methods)
 
 my $used_zone   = $server1->placement;
-my ($new_zone)  = grep {$_ ne $used_zone} $manager->ec2->describe_availability_zones({state=>'available'});
+my ($new_zone)  = grep {$_ ne $used_zone} 
+                  $manager->ec2->describe_availability_zones({state=>'available'});
 
 print STDERR "# spinning up a second test server...\n";
 my $server2 = $manager->get_server(-name              => 'test_server2',
