@@ -2,9 +2,14 @@ package VM::EC2;
 
 =head1 NAME
 
-VM::EC2 - Control the Amazon EC2 and Eucalyptus Clouds
+VM::EC2 - Perl interface to Amazon EC2, Virtual Private Cloud, Elastic Load Balancing, Autoscaling, and Relational Database services
 
 =head1 SYNOPSIS
+
+NOTE: For information on AWS's VPC, load balancing, autoscaling and relational
+databases services, see L<VM::EC2::VPC>, L<VM::EC2::ELB>,
+L<VM::EC2::REST::autoscaling>, and
+L<VM::EC2::REST::relational_database_service>
 
  # set environment variables EC2_ACCESS_KEY, EC2_SECRET_KEY and/or EC2_URL
  # to fill in arguments automatically
@@ -135,12 +140,12 @@ VM::EC2 - Control the Amazon EC2 and Eucalyptus Clouds
 
 =head1 DESCRIPTION
 
-This is an interface to the 2013-07-15 version of the Amazon AWS API
+This is an interface to the 2014-05-01 version of the Amazon AWS API
 (http://aws.amazon.com/ec2). It was written provide access to the new
 tag and metadata interface that is not currently supported by
 Net::Amazon::EC2, as well as to provide developers with an extension
-mechanism for the API. This library will also support the Eucalyptus
-open source cloud (http://open.eucalyptus.com).
+mechanism for the API. This library will also support the Open Stack
+open source cloud (http://www.openstack.org/).
 
 The main interface is the VM::EC2 object, which provides methods for
 interrogating the Amazon EC2, launching instances, and managing
@@ -566,20 +571,22 @@ use strict;
 
 use VM::EC2::Dispatch;
 use VM::EC2::ParmParser;
+eval "require AWS::Signature4"; # optional
 
 use MIME::Base64 qw(encode_base64 decode_base64);
-use Digest::SHA qw(hmac_sha256 sha1_hex);
+use Digest::SHA qw(hmac_sha256 sha1_hex sha256_hex);
 use POSIX 'strftime';
 use URI;
 use URI::Escape;
 use AnyEvent;
 use AnyEvent::HTTP;
+use AnyEvent::CacheDNS ':register';
 use HTTP::Request::Common;
 use VM::EC2::Error;
 use Carp 'croak','carp';
 use JSON;
 
-our $VERSION = '1.25';
+our $VERSION = '1.27';
 our $AUTOLOAD;
 our @CARP_NOT = qw(VM::EC2::Image    VM::EC2::Volume
                    VM::EC2::Snapshot VM::EC2::Instance
@@ -620,6 +627,7 @@ use constant import_tags => {
     ':hpc'      => ['placement_group'],
     ':scaling'  => ['elastic_load_balancer','autoscaling'],
     ':elb'      => ['elastic_load_balancer'],
+    ':rds'      => ['relational_database_service'],
     ':misc'     => ['devpay','reserved_instance', 'spot_instance','vm_export','vm_import','windows'],
     ':all'      => [qw(:standard :vpc :hpc :scaling :misc)],
     ':DEFAULT'  => [':all'],
@@ -695,7 +703,7 @@ created. See
 http://docs.amazonwebservices.com/AWSEC2/latest/UserGuide/UsingIAM.html
 and L</AWS SECURITY TOKENS>.
 
-To use a Eucalyptus cloud, please provide the appropriate endpoint
+To use an Open Stack cloud, please provide the appropriate endpoint
 URL.
 
 By default, when the Amazon API reports an error, such as attempting
@@ -756,6 +764,13 @@ sub new {
     }
 
     return $obj;
+}
+
+sub _region {
+    my $self = shift;
+    my $endpoint = $self->endpoint || return 'us-east-1';
+    my ($region) = $endpoint =~ /([^.]+)\.amazonaws\.com/;
+    return $region || 'us-east-1';
 }
 
 =head2 $access_key = $ec2->access_key([$new_access_key])
@@ -1265,10 +1280,15 @@ documentation (yet).
 sub canonicalize {
     my $self = shift;
     my $name = shift;
-    while ($name =~ /\w[A-Z.]/) {
-	$name    =~ s/([a-zA-Z])\.?([A-Z])/\L$1_$2/g or last;
+
+    $name =~ s/^-//;
+    $name    =~ s/DB/Db/g;
+    $name    =~ s/AZ/Az/g;
+
+    while ($name =~ /[A-Z][^A-Z]/) {
+        $name    =~ s/(?<!^)([A-Z]*[\d]*)\.?([A-Z])/\L$1_$2/g or last;
     }
-    return $name =~ /^-/ ? lc $name : '-'.lc $name;
+    return '-'.lc $name;
 }
 
 sub uncanonicalize {
@@ -1337,20 +1357,57 @@ sub prefix_parm {
     return ("$prefix.$argname"=>$v);
 }
 
-=head2 @parameters = $ec2->member_list_parm(ParameterName => \%args)
+=head2 @arguments = $ec2->member_hash_parms(ParameterName => \%args)
+
+Create a parameter list from a hashref or arrayref of hashes
+
+Created specifically for the RDS ModifyDBParameterGroup parameter
+'Parameters', but may be useful for other calls in the future.
+
+ie:
+
+The argument would be in the form:
+
+   [
+           {
+                   ParameterName=>'max_user_connections',
+                   ParameterValue=>24,
+                   ApplyMethod=>'pending-reboot'
+           },
+           {
+                   ParameterName=>'max_allowed_packet',
+                   ParameterValue=>1024,
+                   ApplyMethod=>'immediate'
+           },
+   ];
+
+The resulting output would be if the argname is '-parameters':
+
+Parameters.member.1.ParameterName => max_user_connections
+Parameters.member.1.ParameterValue => 24
+Parameters.member.1.ApplyMethod => pending-reboot
+Parameters.member.2.ParameterName => max_allowed_packet
+Parameters.member.2.ParameterValue => 1024
+Parameters.member.2.ApplyMethod => immediate
 
 =cut
 
-sub member_list_parm {
+sub member_hash_parms {
     my $self = shift;
     my ($argname,$args) = @_;
     my $name = $self->canonicalize($argname);
 
     my @params;
-    if (my $a = $args->{$name}||$args->{"-$argname"}) {
+    if (my $arg = $args->{$name}||$args->{"-$argname"}) {
+        $arg = [ $arg ] if ref $arg eq 'HASH';
+        return unless ref $arg eq 'ARRAY';
         my $c = 1;
-        for (ref $a && ref $a eq 'ARRAY' ? @$a : $a) {
-            push @params,("$argname.member.".$c++ => $_);
+        foreach my $a (@$arg) {
+            next unless ref $a eq 'HASH';
+            foreach my $key (keys %$a) {
+                push @params, ("$argname.member.$c.$key" => $a->{$key});
+            }
+            $c++;
         }
     }
     return @params;
@@ -1363,10 +1420,27 @@ sub member_list_parm {
 sub list_parm {
     my $self = shift;
     my ($argname,$args) = @_;
+    return $self->_list_parm($argname,$args);
+}
+
+=head2 @parameters = $ec2->member_list_parm(ParameterName => \%args)
+
+=cut
+
+sub member_list_parm {
+    my $self = shift;
+    my ($argname,$args) = @_;
+    return $self->_list_parm($argname,$args,'member');
+}
+
+sub _list_parm {
+    my $self = shift;
+    my ($argname,$args,$append) = @_;
     my $name = $self->canonicalize($argname);
 
     my @params;
     if (my $a = $args->{$name}||$args->{"-$argname"}) {
+        $argname .= ".$append" if $append;
 	my $c = 1;
 	for (ref $a && ref $a eq 'ARRAY' ? @$a : $a) {
 	    push @params,("$argname.".$c++ => $_);
@@ -1393,11 +1467,28 @@ sub filter_parm {
 sub key_value_parameters {
     my $self = shift;
     # e.g. 'Filter', 'Name','Value',{-filter=>{a=>b}}
+    return $self->_key_value_parameters(@_);
+}
+
+=head2 @arguments = $ec2->member_key_value_parameters($param_name,$keyname,$valuename,\%args,$skip_undef_values)
+
+=cut
+
+sub member_key_value_parameters {
+    my $self = shift;
     my ($parameter_name,$keyname,$valuename,$args,$skip_undef_values) = @_;  
+    return $self->_key_value_parameters($parameter_name,$keyname,$valuename,$args,$skip_undef_values,'member');
+}
+
+sub _key_value_parameters {
+    my $self = shift;
+    # e.g. 'Filter', 'Name','Value',{-filter=>{a=>b}}
+    my ($parameter_name,$keyname,$valuename,$args,$skip_undef_values,$append) = @_;  
     my $arg_name     = $self->canonicalize($parameter_name);
     
     my @params;
     if (my $a = $args->{$arg_name}||$args->{"-$parameter_name"}) {
+        $parameter_name .= ".$append" if $append;
 	my $c = 1;
 	if (ref $a && ref $a eq 'HASH') {
 	    while (my ($name,$value) = each %$a) {
@@ -1587,6 +1678,15 @@ sub boolean_parm {
     return ($argname => $val ? 'true' : 'false');
 }
 
+sub boolean_value_parm {
+    my $self = shift;
+    my ($argname,$args) = @_;
+    my $name = $self->canonicalize($argname);
+    return unless exists $args->{$name} || exists $args->{$argname};
+    my $val = $args->{$name} || $args->{$argname};
+    return ("$argname.Value" => $val ? 'true' : 'false');
+}
+
 =head2 $version = $ec2->version()
 
 Returns the API version to be sent to the endpoint. Calls
@@ -1613,7 +1713,7 @@ sub guess_version_from_endpoint {
     my $self = shift;
     my $endpoint = $self->endpoint;
     return '2009-04-04' if $endpoint =~ /Eucalyptus/;  # eucalyptus version according to http://www.eucalyptus.com/participate/code
-    return '2013-07-15';                               # most recent AWS version that we support
+    return '2014-05-01';                               # most recent AWS version that we support
 }
 
 =head2 $ts = $ec2->timestamp
@@ -1669,44 +1769,95 @@ sub _call_sync {
 sub _call_async {
     my $self  = shift;
     my ($action,@param) = @_;
-    my $post  = $self->_signature(Action=>$action,@param);
-    my $u     = URI->new($self->endpoint);
-    $u->query_form(@$post);
-    $self->async_post($action,$self->endpoint,$u->query);
+
+    # called if AWS::Signature4 NOT present; use built-in method
+    unless (AWS::Signature4->can('new')) {
+	my ($action,@param) = @_;
+	my $post  = $self->_signature(Action=>$action,@param);
+	my $u     = URI->new($self->endpoint);
+	$u->query_form(@$post);
+	return $self->async_post($action,POST($self->endpoint,Content=>$u->query));
+    }
+
+
+    # called if AWS::Signature4 IS present; use external module
+    my $request = POST($self->endpoint,
+		       'content-type'=>'application/x-www-form-urlencoded',
+		       Content => [
+			   Action  => $action,
+			   Version => $self->version,
+			   @param
+		       ]);
+    my $access_key = $self->access_key;
+    my $secret_key = $self->secret;
+    my $host       = URI->new($self->endpoint)->host;
+    $request->header('x-amz-security-token'=>$self->security_token) if $self->security_token;
+    $request->header('user-agent' => 'VM::EC2-perl');
+    $request->header('action'     => $action);  # maybe not necessary, but docs say it is!
+    $request->header('host'       => $host);
+    
+    AWS::Signature4->new(-access_key=>$access_key,
+			 -secret_key=>$secret_key)->sign($request);
+    $self->async_post($action,$request);
 }
 
 sub async_post {
     my $self = shift;
-    my ($action,$endpoint,$query) = @_;
+    $self->async_request('POST',@_);
+}
+
+sub async_get {
+    my $self = shift;
+    $self->async_request('GET',@_);
+}
+
+sub async_put {
+    my $self = shift;
+    $self->async_request('PUT',@_);
+}
+
+sub async_delete {
+    my $self = shift;
+    $self->async_request('DELETE',@_);
+}
+
+sub async_request {
+    my $self = shift;
+    my ($method,$action,$request) = @_;
+
+    my @headers;
+    $request->headers->scan(sub {push @headers,@_});
 
     my $cv    = $self->condvar;
     my $callback = sub {
 	my $timer = shift;
-	http_post($endpoint,
-		  $query,
-		  headers => {
-		      'Content-Type' => 'application/x-www-form-urlencoded',
-		      'User-Agent'   => 'VM::EC2-perl',
-		  },
-		  sub {
-		      my ($body,$hdr) = @_;
-		      if ($hdr->{Status} !~ /^2/) { # an error
-			  if ($body =~ /RequestLimitExceeded/) {
-			      warn "RequestLimitExceeded. Retry in ",$timer->next_interval()," seconds\n";
-			      $timer->retry();
-			      return;
-			  } else {
-			      $self->async_send_error($action,$hdr,$body,$cv);
-			      $timer->success();
-			      return;
-			  }
-		      } else { # success
-			  $self->error(undef);
-			  my @obj = VM::EC2::Dispatch->content2objects($action,$body,$self);
-			  $cv->send(@obj);
-			  $timer->success();
-		      }
-		  })
+	http_request(
+	    $method => $request->uri,
+	    body    => $request->content,
+	    headers => {
+		TE      => undef,
+		Referer => undef,
+		@headers,
+	    },
+	    sub {
+		my ($body,$hdr) = @_;
+		if ($hdr->{Status} !~ /^2/) { # an error
+		    if ($body =~ /RequestLimitExceeded/) {
+			warn "RequestLimitExceeded. Retry in ",$timer->next_interval()," seconds\n";
+			$timer->retry();
+			return;
+		    } else {
+			$self->async_send_error($action,$hdr,$body,$cv);
+			$timer->success();
+			return;
+		    }
+		} else { # success
+		    $self->error(undef);
+		    my @obj = VM::EC2::Dispatch->content2objects($action,$body,$self);
+		    $cv->send(@obj);
+		    $timer->success();
+		}
+	    })
     };
     RetryTimer->new(on_retry       => $callback,
 		    interval       => 1,
