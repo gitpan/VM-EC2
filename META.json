@@ -4,7 +4,7 @@
       "Lincoln Stein <lincoln.stein@oicr.on.ca>"
    ],
    "dynamic_config" : 1,
-   "generated_by" : "Module::Build version 0.4005, CPAN::Meta::Converter version 2.142060",
+   "generated_by" : "Module::Build version 0.421",
    "license" : [
       "perl_5"
    ],
@@ -44,7 +44,7 @@
       },
       "VM::EC2" : {
          "file" : "lib/VM/EC2.pm",
-         "version" : "1.27"
+         "version" : "1.28"
       },
       "VM::EC2::ASG" : {
          "file" : "lib/VM/EC2/ASG.pm"
@@ -584,5 +584,5 @@
          "http://dev.perl.org/licenses/"
       ]
    },
-   "version" : "1.27"
+   "version" : "1.28"
 }
